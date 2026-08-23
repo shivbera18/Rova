@@ -14,15 +14,17 @@ function RiderConsole({
   setSafetyOpen,
   pushState,
   setPushState,
+  activeTab,
 }: {
   logout: () => void;
   safetyOpen: boolean;
   setSafetyOpen: (open: boolean) => void;
   pushState: NotificationPermission;
   setPushState: (state: NotificationPermission) => void;
+  activeTab: "book" | "history";
 }): React.ReactElement {
   return (
-    <div className="shell" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div className="shell" style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
       <header className="topbar">
         <Link to="/" className="brand-badge">
           CHALO<span className="brand-accent">-X</span> RIDER
@@ -51,12 +53,8 @@ function RiderConsole({
         )}
       </header>
       {safetyOpen && <SafetyPanel onClose={() => setSafetyOpen(false)} />}
-      <main className="main-area" style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-        <Routes>
-          <Route path="/book" element={<Book />} />
-          <Route path="/history" element={<History />} />
-          <Route path="*" element={<Navigate to="/book" replace />} />
-        </Routes>
+      <main className="main-area" style={{ flex: 1, position: "relative", overflow: "hidden", height: "100%", width: "100%" }}>
+        {activeTab === "history" ? <History /> : <Book />}
       </main>
     </div>
   );
@@ -121,7 +119,7 @@ export default function App(): React.ReactElement {
 
       {/* Route 3: Authenticated Rider Workspace (/book, /history) */}
       <Route
-        path="/book/*"
+        path="/book"
         element={
           token ? (
             <RiderConsole
@@ -130,6 +128,7 @@ export default function App(): React.ReactElement {
               setSafetyOpen={setSafetyOpen}
               pushState={pushState}
               setPushState={setPushState}
+              activeTab="book"
             />
           ) : (
             <Navigate to="/login" replace />
@@ -147,6 +146,7 @@ export default function App(): React.ReactElement {
               setSafetyOpen={setSafetyOpen}
               pushState={pushState}
               setPushState={setPushState}
+              activeTab="history"
             />
           ) : (
             <Navigate to="/login" replace />

@@ -162,7 +162,7 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <div className="app-shell" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div className="app-shell" style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
       <header className="topbar">
         <Link to="/" className="brand-badge">
           CHALO<span className="brand-accent">-X</span> DRIVER
@@ -196,7 +196,7 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
         </div>
       </header>
 
-      <div className="map-wrap" style={{ flex: 1, position: "relative" }}>
+      <div className="map-wrap" style={{ flex: 1, position: "relative", height: "100%", width: "100%" }}>
         <MapView
           me={myPos}
           stops={stops}
@@ -333,7 +333,7 @@ export default function App() {
 
       {/* Route 3: Driver Radar / Dashboard (/drive) */}
       <Route
-        path="/drive/*"
+        path="/drive"
         element={
           token ? (
             <DriverConsole onLogout={handleLogout} />

@@ -130,7 +130,10 @@ export function DriverLanding({
           overflow: "hidden",
           background: "var(--ink)",
           color: "#ffffff",
-          padding: "12px 0",
+          minHeight: "44px",
+          height: "44px",
+          display: "flex",
+          alignItems: "center",
           borderBottom: "var(--brut-border)",
           position: "relative",
           zIndex: 10,
@@ -144,6 +147,8 @@ export function DriverLanding({
             textTransform: "uppercase",
             fontSize: 13,
             letterSpacing: "0.08em",
+            display: "inline-flex",
+            alignItems: "center",
           }}
         >
           {[0, 1, 2].map((copy) => (

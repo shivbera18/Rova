@@ -69,15 +69,15 @@ export async function createTripFromAgreement(
     params.listPricePaise > 0
       ? Math.round(((params.listPricePaise - params.agreedPaise) / params.listPricePaise) * 1000) / 10
       : 0;
-  const fare = {
+  const fare: TripFare = {
     mode: params.mode,
     agreedPaise: params.agreedPaise,
     platformFeePaise: params.platformFeePaise,
     riderTotalPaise: (params.agreedPaise + params.platformFeePaise) as Paise,
     listPricePaise: params.listPricePaise,
     discountVsListPct: discountPct,
-    tollPaise: 0 as Paise,
-    tipPaise: 0 as Paise,
+    tollPaise: 0,
+    tipPaise: 0,
     negotiationId: params.negotiationId ?? null,
   };
 
@@ -103,8 +103,8 @@ export async function createTripFromAgreement(
   );
   await sql.query("UPDATE ride_requests SET state='AGREED', version=version+1 WHERE id=$1", [params.requestId]);
   await sql.query(
-    "INSERT INTO otp_codes (trip_id, code_hash, otp_plain, expires_at) VALUES ($1,$2,$3,$4)",
-    [id, hashOtp(id, otp), otp, new Date(Date.now() + 6 * 3600_000)],
+    "INSERT INTO otp_codes (trip_id, code_hash, expires_at) VALUES ($1,$2,$3)",
+    [id, hashOtp(id, otp), new Date(Date.now() + 6 * 3600_000)],
   );
   releaseClaim(params.requestId);
 
@@ -162,15 +162,25 @@ export async function verifyStartOtp(sql: SqlRowClient, tripId: string, otp: str
   return ok;
 }
 
+/** On-demand OTP re-generation for the rider pre-ride (C5 fix: zero plaintext OTPs at rest). */
+export async function regenerateTripOtp(sql: SqlRowClient, tripId: string): Promise<string> {
+  const trip = await getTrip(sql, tripId);
+  if (!trip) throw new TripError("NOT_FOUND", "trip does not exist");
+  if (!["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state)) {
+    throw new TripError("INVALID_STATE", "cannot regenerate OTP after trip has started");
+  }
+  const newOtp = String(randomInt(100000, 999999));
+  await sql.query(
+    "UPDATE otp_codes SET code_hash=$2, attempts=0, expires_at=$3 WHERE trip_id=$1",
+    [tripId, hashOtp(tripId, newOtp), new Date(Date.now() + 6 * 3600_000)],
+  );
+  return newOtp;
+}
+
 export interface SettlementResult {
   txnId: string;
   duplicate: boolean;
-  fareJson: {
-    agreedPaise: number;
-    platformFeePaise: number;
-    riderTotalPaise: number;
-    tipPaise?: number;
-  };
+  fareJson: TripFare;
 }
 
 /** COMPLETED → post balanced settlement; idempotent per trip so retries never double-charge. */

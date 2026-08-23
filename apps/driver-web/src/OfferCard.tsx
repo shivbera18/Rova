@@ -192,7 +192,7 @@ export function OfferCard({
         <button className="btn btn-accept" disabled={busy} onClick={() => void accept()}>
           ✓ Accept {formatINR(paisa(offer.takeHomePaise))}
         </button>
-        {offer.negotiationId && !showCounter && (
+        {offer.negotiationId && !offer.isCounter && !showCounter && (
           <button className="btn btn-counter" disabled={busy} onClick={() => setShowCounter(true)}>
             💬 Counter
           </button>

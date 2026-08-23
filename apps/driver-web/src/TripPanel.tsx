@@ -174,6 +174,16 @@ export function TripPanel({
           </button>
         </div>
       )}
+      {(trip.state === "CANCELLED_RIDER" || trip.state === "CANCELLED_DRIVER") && (
+        <div>
+          <div style={{ background: "var(--bad-dim)", color: "var(--bad)", padding: 12, borderRadius: 10, textAlign: "center", fontWeight: 700, marginBottom: 12 }}>
+            ✕ Ride Cancelled ({trip.state === "CANCELLED_RIDER" ? "By Passenger" : "By You"})
+          </div>
+          <button className="btn btn-accept" style={{ width: "100%" }} onClick={onFinished}>
+            Back Online for Next Ride
+          </button>
+        </div>
+      )}
     </div>
   );
 }

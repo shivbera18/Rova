@@ -69,3 +69,49 @@ What exists today, client-side:
 | D6 | Offer chime may be silent: `AudioContext` requires a prior user gesture on mobile browsers (`OfferCard.tsx:12`) | The alert that makes dispatch work may never fire on a phone | Prime the context when toggling online; add vibration fallback |
 
 ---
+
+## 4. Cross-cutting UX debt
+
+1. **Session fragility.** Any single 401 wipes the token mid-flow (`api.ts` in both apps) and ejects the user to login — including if the JWT TTL lapses during a long ride. There is no refresh mechanism. Needs sliding expiry or refresh tokens, plus a "session expired, sign back in" interstitial instead of instant ejection.
+2. **Mobile form factor.** Both apps are desktop side-panel layouts (fixed-width cards floating over a full map). Riders and drivers are phone-first; without a responsive pass (bottom-sheet pattern, thumb-reachable primary buttons, no hover-dependent interactions) the product is undemoable on the device that matters. Audit each screen with a device toolbar before any external demo.
+3. **Not installable.** No PWA manifest / service worker / offline shell. Add-to-homescreen is cheap and high-leverage for this market.
+4. **English-only.** Target market is India; driver copy like "Head to Pickup" assumes English literacy. Strings are centralized enough that i18n now is far cheaper than later.
+5. **Accessibility gaps.** Tooltips are CSS-hover-only with `tabIndex=0` but no focus/blur wiring or ARIA; status pills carry meaning by color alone; star/chip buttons lack visible focus rings; the OTP display has no copy-to-clipboard or aria-live announcement.
+6. **Zero client-side tests.** The engine has 130+ passing checks; the UIs have none. Minimum viable: a Playwright happy path (rider books → driver accepts → ride completes) against the same fixture `test:e2e` boots — the full-flow scenarios map 1:1 to browser flows already.
+7. **Night multiplier is invisible.** Pricing applies `night_multiplier` 23:00–05:00 (`pricing.ts:40-41`), but nothing explains why tonight's list price differs from yesterday's. Users already understand surge-style explainers — add one chip.
+
+---
+
+## 5. Explicitly out of scope for v1 (don't pull these forward)
+
+These came up during review and are correctly absent:
+- Multi-city support — `city_id` plumbing exists; UI hardcoding Bengaluru is fine for pilot.
+- Surge controls, promo codes, referrals, loyalty.
+- Chat/call between rider and driver — Google Maps deep-links cover navigation v1.
+- Redis GEO dispatch / Redpanda bus swap — single-node in-process dispatch is fine at pilot scale.
+- MSG91 SMS integration slot — dev OTP is correct for now. **But hide the `devHint` / "dev: 123456" pill behind `NODE_ENV`** before any external demo; it currently renders unconditionally (`Login.tsx:125`, `/v1/auth/otp/send` response).
+
+---
+
+## 6. Recommended order of attack
+
+| Wave | Items | Outcome |
+|---|---|---|
+| **1 — honesty fixes** (days) | U1 tip-or-remove · U2 rider cancel endpoint + button · U4 real rolling ratings · U5 receipt fields · regenerate-OTP button · hide dev OTP hint | The product stops lying to its users |
+| **2 — survivability** (1–2 wks) | R1 wallet balance check (+display) · R5/D6 connection awareness + alerts · D3 online persistence · session-expiry handling · responsive/mobile pass | Usable on a phone, by a stranger, on flaky networks |
+| **3 — growth** (then) | D1 payouts · D2 onboarding/KYC · R2 geolocation · R7 receipt detail · D4 earnings aggregation · i18n · PWA · Playwright suite | Ready for pilots outside the team |
+
+---
+
+## 7. Backend micro-gaps surfaced by this review (small, worth batching)
+
+These are backend one-liners discovered while auditing UI expectations — cheap to fix in a single commit batch:
+1. `tripView()` missing `paymentMethod` / `startedAt` / `endedAt` (U5).
+2. No `cancel-rider` trip route (U2).
+3. Rate endpoint never updates `rating_rolling` (U4).
+4. `/v1/driver/me` omits rating → forces the hardcoded `★ 4.9`.
+5. WS `trip.location` message type defined in protocol, never emitted (R3).
+6. No wallet-balance guard on `paymentMethod: WALLET` booking (R1).
+
+---
+*Evidence policy: every claim cites file + line in the current tree; behavioral claims were verified against the running stack (Neon-backed full-flow suite, 66/66 passing at time of writing).*

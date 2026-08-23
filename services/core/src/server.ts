@@ -18,7 +18,7 @@ import type { Storage } from "./db/storage.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { logger } from "./logger.ts";
 import { seedData } from "./db/seed.ts";
-import { DEV_OTP, issueToken, upsertUser, verifyToken } from "./auth.ts";
+import { DEV_OTP, issueToken, upsertUser, upsertUserWithPassword, verifyToken } from "./auth.ts";
 import { estimateDistanceKm, issueQuoteToken, quoteTrip, verifyQuoteToken } from "./pricing.ts";
 import {
   cancelByRider,
@@ -179,6 +179,21 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
     if (otp !== DEV_OTP) fail(401, "BAD_OTP", "wrong code");
     const user = await upsertUser(sql, phone!, role!, fullName ?? "Chalo user");
+    return { token: await issueToken(user.id, role!), userId: user.id, role };
+  });
+
+  // Password login: first sign-up registers the password; later logins verify it.
+  app.post("/v1/auth/login/password", async (req) => {
+    const { phone, password, role } = req.body as {
+      phone?: string;
+      password?: string;
+      role?: "RIDER" | "DRIVER";
+    };
+    if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
+    if (!password || typeof password !== "string" || password.length < 4) {
+      fail(400, "WEAK_PASSWORD", "password must be at least 4 characters");
+    }
+    const user = await upsertUserWithPassword(sql, phone!, role!, password);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
   });
 

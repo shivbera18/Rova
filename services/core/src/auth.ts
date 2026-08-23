@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import type { Role } from "@chalo/protocol";
 import type { SqlRowClient } from "./types.ts";
@@ -79,4 +79,69 @@ export async function upsertUser(
     role,
   ]);
   return { id };
+}
+
+
+/**
+ * Password login per plan §7.1 (web-first variant):
+ *  - First call for a phone REGISTERS the password (scrypt hash).
+ *  - Subsequent calls VERIFY it.
+ * Hash stored in users.password_hash: scrypt$<saltHex>$<hashHex>
+ */
+export async function upsertUserWithPassword(
+  sql: SqlRowClient,
+  phone: string,
+  role: Role,
+  password: string,
+): Promise<{ id: string; isNew: boolean }> {
+  const bidx = phoneBlindIndex(phone);
+  const existing = await sql.query<{ id: string; role: Role; password_hash: string | null }>(
+    "SELECT id, role, password_hash FROM users WHERE phone_bidx = $1",
+    [bidx],
+  );
+  if (existing.rows.length === 0) {
+    const created = await upsertUser(sql, phone, role, "Chalo user");
+    const { saltHex, hashHex } = hashPassword(password);
+    await sql.query("UPDATE users SET password_hash = $2 WHERE id = $1", [
+      created.id,
+      `scrypt$${saltHex}$${hashHex}`,
+    ]);
+    return { id: created.id, isNew: true };
+  }
+  const row = existing.rows[0]!;
+  if (row.role !== role) {
+    throw new AuthError("ROLE_MISMATCH", `Phone number is already registered as a ${row.role.toLowerCase()}`);
+  }
+  if (!row.password_hash) {
+    // account exists via OTP but has no password yet — register this one
+    const { saltHex, hashHex } = hashPassword(password);
+    await sql.query("UPDATE users SET password_hash = $2 WHERE id = $1", [
+      row.id,
+      `scrypt$${saltHex}$${hashHex}`,
+    ]);
+    return { id: row.id, isNew: true };
+  }
+  if (!verifyPassword(password, row.password_hash)) {
+    throw new AuthError("BAD_PASSWORD", "Incorrect password for this phone number");
+  }
+  return { id: row.id, isNew: false };
+}
+
+function hashPassword(password: string): { saltHex: string; hashHex: string } {
+  const salt = randomBytes(16);
+  const hash = scryptSync(password, salt, 32);
+  return { saltHex: salt.toString("hex"), hashHex: hash.toString("hex") };
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  const parts = stored.split("$");
+  if (parts.length !== 3 || parts[0] !== "scrypt") return false;
+  try {
+    const salt = Buffer.from(parts[1]!, "hex");
+    const expected = Buffer.from(parts[2]!, "hex");
+    const actual = scryptSync(password, salt, 32);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 }

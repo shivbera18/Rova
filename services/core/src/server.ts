@@ -57,6 +57,8 @@ import {
 import { walletBalance } from "./ledger.ts";
 import type { LatLon } from "./types.ts";
 import type { TripRow } from "./db/rows.ts";
+import { enforceRateLimit, validateDriverGps, validateRideRequest } from "./security.ts";
+import { removePushSubscription, savePushSubscription, sendPush, vapidPublicKey } from "./push.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const CITY_ID = 1;
@@ -114,6 +116,10 @@ export async function startServer(listenPort = PORT): Promise<{
     const start = (req as any)._startTime ?? performance.now();
     logger.http(req.method, req.url, reply.statusCode, performance.now() - start);
   });
+  app.addHook("onRequest", async (req) => {
+    // Broad abuse ceiling. Sensitive routes add stricter policies below.
+    enforceRateLimit(`ip:${req.ip}`, 300, 60_000);
+  });
 
   async function session(req: FastifyRequest): Promise<Session | null> {
     const header = req.headers.authorization;
@@ -162,11 +168,12 @@ export async function startServer(listenPort = PORT): Promise<{
   }
 
   // ---- auth ------------------------------------------------------------------
-
   app.post("/v1/auth/otp/send", async (req) => {
     const { phone } = req.body as { phone?: string };
     if (!phone || !/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
-    return { sent: true, devHint: `use ${DEV_OTP}` }; // MSG91 adapter slot per plan §5
+    enforceRateLimit(`otp-ip:${req.ip}`, 10, 10 * 60_000);
+    enforceRateLimit(`otp-phone:${phone}`, 5, 10 * 60_000);
+    return { sent: true, devHint: `use ${DEV_OTP}` };
   });
 
   app.post("/v1/auth/otp/verify", async (req) => {
@@ -217,6 +224,22 @@ export async function startServer(listenPort = PORT): Promise<{
     return { quotes };
   });
 
+  app.get("/v1/push/vapid-key", async () => ({ publicKey: vapidPublicKey() }));
+
+  app.post("/v1/push/subscribe", async (req) => {
+    const sess = requireAuth(await session(req));
+    const { subscription } = req.body as { subscription?: any };
+    if (!subscription?.endpoint || !subscription?.keys) fail(400, "BAD_SUBSCRIPTION", "valid push subscription required");
+    await savePushSubscription(sql, sess.userId, subscription);
+    return { ok: true };
+  });
+
+  app.post("/v1/push/unsubscribe", async (req) => {
+    requireAuth(await session(req));
+    const { endpoint } = req.body as { endpoint?: string };
+    if (endpoint) await removePushSubscription(sql, endpoint);
+    return { ok: true };
+  });
   // ---- ride requests -----------------------------------------------------------
 
   app.post("/v1/requests", async (req) => {
@@ -224,6 +247,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const body = req.body as {
       quoteToken?: string;
       offerPaise?: number;
+      platformFeePaise?: number;
       vehicleClass?: VehicleClass;
       paymentMethod?: "WALLET" | "UPI" | "CASH";
       pickup?: LatLon;
@@ -234,7 +258,19 @@ export async function startServer(listenPort = PORT): Promise<{
       fail(400, "BAD_BODY", "quoteToken, vehicleClass, paymentMethod, pickup, drop required");
     }
     const negotiated = typeof body.offerPaise === "number";
-
+    const platformContribution = negotiated ? (body.platformFeePaise ?? payload!.pf) : payload!.pf;
+    if (negotiated && (!Number.isSafeInteger(body.offerPaise) || body.offerPaise! < 0)) {
+      fail(400, "INVALID_OFFER", "driver offer must be non-negative integer paise");
+    }
+    if (!Number.isSafeInteger(platformContribution) || platformContribution < 0) {
+      fail(400, "INVALID_PLATFORM_FEE", "platform contribution must be non-negative integer paise");
+    }
+    await validateRideRequest(sql, sess.userId, {
+      offerPaise: body.offerPaise,
+      platformFeePaise: body.platformFeePaise,
+      pickup: body.pickup!,
+      drop: body.drop!,
+    });
     const requestId = randomUUID();
     await sql.query(
       `INSERT INTO ride_requests
@@ -254,7 +290,7 @@ export async function startServer(listenPort = PORT): Promise<{
         body.drop!.lat,
         body.drop!.lng,
         payload!.lp,
-        payload!.pf,
+        platformContribution,
       ],
     );
 
@@ -269,7 +305,7 @@ export async function startServer(listenPort = PORT): Promise<{
         body.vehicleClass!,
         body.offerPaise as never,
         payload!.lp as never,
-        payload!.pf as never,
+        platformContribution as never,
         body.paymentMethod!,
       );
       negotiationId = neg.id;
@@ -294,11 +330,14 @@ export async function startServer(listenPort = PORT): Promise<{
       sessionId: requestId,
       mode: negotiated ? ("NEGOTIATED" as const) : ("LIST" as const),
       state: negotiated ? ("NEGOTIATING" as const) : ("MATCHING" as const),
+      expiresAt: expiresAt.toISOString(),
       negotiationId,
       round: 1,
       maxRounds: 3,
       listPrice: payload!.lp,
       currentOfferPaise: negotiated ? body.offerPaise : undefined,
+      platformFeePaise: platformContribution,
+      riderTotalPaise: (negotiated ? body.offerPaise! : payload!.tf) + platformContribution,
       deliveredToDrivers: delivered,
     };
   });
@@ -341,9 +380,16 @@ export async function startServer(listenPort = PORT): Promise<{
       riderRating: Number(rr.rider_rating ?? 4.8),
       paymentMethod: o.paymentMethod as never,
       vehicleClass: rr.vehicle_class,
+      notify: (driverId) => {
+        void sendPush(sql, driverId, {
+          title: `New ${rr.vehicle_class.replaceAll("_", " ")} request`,
+          body: `Earn ₹${(o.takeHomePaise / 100).toFixed(2)} · ${km} km trip · ${o.paymentMethod}`,
+          url: "/",
+          tag: `ride-${o.requestId}`,
+        });
+      },
     });
   }
-
   app.get("/v1/requests/:id", async (req) => {
     const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
@@ -414,11 +460,10 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/negotiations/:id/counter", async (req) => {
-    // DRIVER counters with take-home ask; first counter claims the negotiation
     const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     const { paise } = req.body as { paise?: number };
-    if (typeof paise !== "number") fail(400, "BAD_BODY", "paise required");
+    if (!Number.isSafeInteger(paise) || paise! < 0) fail(400, "BAD_BODY", "non-negative paise required");
     try {
       const neg0 = await getNegotiation(sql, id);
       if (!neg0) fail(404, "NOT_FOUND", "no such negotiation");
@@ -434,6 +479,12 @@ export async function startServer(listenPort = PORT): Promise<{
         round: updated.round,
         expiresAt: new Date(updated.expires_at).toISOString(),
       });
+      void sendPush(sql, neg0.rider_id, {
+        title: "Driver sent a counter-offer",
+        body: `Driver asks ₹${(paise! / 100).toFixed(2)}. Open Chalo-X to respond.`,
+        url: "/",
+        tag: `counter-${id}`,
+      });
       return { state: updated.state, round: updated.round };
     } catch (err) {
       if (err instanceof NegotationError) fail(409, err.code, err.message);
@@ -442,10 +493,12 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/negotiations/:id/rider-accept", async (req) => {
-    // RIDER accepts a driver counter — the claiming driver gets the trip
     const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
     try {
+      const existing = await getNegotiation(sql, id);
+      if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
+      if (existing.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
       const neg = await riderAcceptCounter(sql, id);
       const driverId = claimedDriver(neg.request_id);
       if (!driverId) fail(409, "NO_DRIVER", "countering driver unavailable");
@@ -458,13 +511,20 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/negotiations/:id/final", async (req) => {
-    // RIDER final closing offer after a driver counter
     const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
-    const { paise } = req.body as { paise?: number };
-    if (typeof paise !== "number") fail(400, "BAD_BODY", "paise required");
+    const { paise, platformFeePaise } = req.body as { paise?: number; platformFeePaise?: number };
+    if (!Number.isSafeInteger(paise) || paise! < 0) fail(400, "BAD_BODY", "non-negative driver paise required");
+    if (!Number.isSafeInteger(platformFeePaise) || platformFeePaise! < 0) {
+      fail(400, "BAD_BODY", "non-negative platform contribution required");
+    }
     try {
+      const existing = await getNegotiation(sql, id);
+      if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
+      if (existing.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
       const updated = await riderFinalOffer(sql, id, paise as never);
+      await sql.query("UPDATE negotiations SET platform_fee=$2 WHERE id=$1", [id, platformFeePaise]);
+      await sql.query("UPDATE ride_requests SET platform_fee=$2 WHERE id=$1", [updated.request_id, platformFeePaise]);
       const rr = (
         await sql.query<{ pickup_lat: number; pickup_lng: number; drop_lat: number; drop_lng: number; payment_method: string }>(
           "SELECT * FROM ride_requests WHERE id=$1",
@@ -490,19 +550,20 @@ export async function startServer(listenPort = PORT): Promise<{
           state: "NEGOTIATING",
           negotiationId: updated.id,
           currentOfferPaise: updated.current_offer as never,
+          platformFeePaise: platformFeePaise as never,
+          riderTotalPaise: (updated.current_offer + platformFeePaise!) as never,
           round: updated.round,
           maxRounds: 3,
           expiresAt: new Date(updated.expires_at).toISOString(),
           listPrice: updated.list_price as never,
         },
       });
-      return { state: updated.state, round: updated.round };
+      return { state: updated.state, round: updated.round, platformFeePaise };
     } catch (err) {
       if (err instanceof NegotationError) fail(409, err.code, err.message);
       throw err;
     }
   });
-
   app.post("/v1/negotiations/:id/rider-decline", async (req) => {
     const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
@@ -514,6 +575,7 @@ export async function startServer(listenPort = PORT): Promise<{
     }
     try {
       const neg = await riderDecline(sql, id);
+      await sql.query("UPDATE ride_requests SET state='DECLINED', version=version+1 WHERE id=$1", [neg.request_id]);
       releaseClaim(neg.request_id);
       void cancelBroadcast(neg.request_id);
       return { ok: true };
@@ -687,6 +749,12 @@ export async function startServer(listenPort = PORT): Promise<{
 
     const view = tripView({ ...trip, otpPlain: otp });
     pushRider(rr.rider_id, { t: "driver.assigned", trip: { ...view, otp } as never });
+    void sendPush(sql, rr.rider_id, {
+      title: "Your driver is confirmed",
+      body: `Driver accepted ₹${(agreed / 100).toFixed(2)}. Open Chalo-X for the start OTP.`,
+      url: "/",
+      tag: `trip-${trip.id}`,
+    });
     pushDriver(driverId, { t: "trip.state", state: "DRIVER_ASSIGNED", tripId: trip.id });
 
     // register live presence for tracking
@@ -781,12 +849,17 @@ export async function startServer(listenPort = PORT): Promise<{
           return;
         }
         if (msg.t === "pos.update" && typeof msg.lat === "number" && typeof msg.lng === "number") {
-          setDriverPos(sess.userId, { lat: msg.lat, lng: msg.lng });
-          void sql.query("UPDATE driver_profiles SET last_lat=$2, last_lng=$3 WHERE user_id=$1", [
-            sess.userId,
-            msg.lat,
-            msg.lng,
-          ]);
+          try {
+            validateDriverGps(sess.userId, { lat: msg.lat, lng: msg.lng });
+            setDriverPos(sess.userId, { lat: msg.lat, lng: msg.lng });
+            void sql.query("UPDATE driver_profiles SET last_lat=$2, last_lng=$3 WHERE user_id=$1", [
+              sess.userId,
+              msg.lat,
+              msg.lng,
+            ]);
+          } catch (err) {
+            logger.warn("FRAUD", `Rejected driver GPS update user=${sess.userId.slice(0, 8)}`, err);
+          }
         }
       });
       socket.on("close", () => {

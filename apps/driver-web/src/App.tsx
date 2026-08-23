@@ -7,6 +7,7 @@ import { MapView, type MapStops } from "./MapView";
 import { OfferCard, type OfferEntry } from "./OfferCard";
 import { TripPanel } from "./TripPanel";
 import { EarningsDrawer, type DriverMe } from "./EarningsDrawer";
+import { enablePushNotifications, pushSupported } from "./push";
 
 const TRIP_KEY = "cx.driver.trip";
 
@@ -40,6 +41,9 @@ function Console() {
   const [sessionReady, setSessionReady] = useState(false);
 
   const onlineRef = useRef(online);
+  const [pushState, setPushState] = useState<NotificationPermission>(
+    () => (pushSupported() ? Notification.permission : "denied"),
+  );
   onlineRef.current = online;
   const sockRef = useRef<DriverSocket | null>(null);
   const posRef = useRef<LatLon>(myPos);
@@ -215,6 +219,16 @@ function Console() {
             }}
           />
         </div>
+
+        {pushSupported() && pushState !== "granted" && (
+          <button
+            className="brut-btn brut-btn-white"
+            style={{ padding: "8px 12px", fontSize: 11 }}
+            onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
+          >
+            🔔 Enable alerts
+          </button>
+        )}
 
         <button className="brut-btn brut-btn-white" style={{ padding: "8px 14px", fontSize: 12 }} onClick={() => setDrawerOpen(true)}>
           {me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}

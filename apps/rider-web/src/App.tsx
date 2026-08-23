@@ -5,11 +5,15 @@ import Login from "./screens/Login";
 import { Landing } from "./components/Landing";
 import Book from "./screens/Book";
 import History from "./screens/History";
+import { enablePushNotifications, pushSupported } from "./push";
 
 export default function App(): React.ReactElement {
   const [token, setTok] = useState<string | null>(getToken());
   const [showLanding, setShowLanding] = useState(true);
   const navigate = useNavigate();
+  const [pushState, setPushState] = useState<NotificationPermission>(
+    () => (pushSupported() ? Notification.permission : "denied"),
+  );
 
   // Returning users skip the landing page
   useEffect(() => {
@@ -64,6 +68,14 @@ export default function App(): React.ReactElement {
                   <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
                     🧾 History
                   </NavLink>
+                  {pushSupported() && pushState !== "granted" && (
+                    <button
+                      className="navlink"
+                      onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
+                    >
+                      🔔 Alerts
+                    </button>
+                  )}
                   <button className="navlink" onClick={logout}>
                     Log out
                   </button>

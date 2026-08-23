@@ -12,4 +12,17 @@ export const MIGRATIONS_INTEGRATION = [
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text;
     `,
   },
+  {
+    id: "0006_push_subscriptions",
+    sql: `
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id uuid PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint text UNIQUE NOT NULL,
+      subscription_json jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions (user_id);
+    `,
+  },
 ];

@@ -82,6 +82,8 @@ export interface BroadcastOffer {
   paymentMethod: string;
   /** only push to drivers of this class (or ALL in dev mode) */
   vehicleClass: string;
+  /** optional side channel (Web Push) after socket delivery */
+  notify?: (driverId: string) => void;
   pickup: LatLon;
   drop: LatLon;
   tripKm: number;
@@ -142,6 +144,7 @@ export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
     const sent = d.push({ t: "dispatch.offer", offer: payload });
     if (sent) {
       delivered++;
+      offer.notify?.(d.driverId);
       logger.dispatch(`  -> Driver ${d.driverId.slice(0, 8)} (${d.name}, ${d.vehicleClass}) DELIVERED (dist=${km.toFixed(1)} km)`);
     } else {
       logger.dispatch(`  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) FAILED: socket not ready`);

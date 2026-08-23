@@ -1,0 +1,19 @@
+{
+  "name": "chalo-x",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.12.3",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "turbo run build",
+    "dev:rider": "pnpm --filter rider-web dev",
+    "dev:driver": "pnpm --filter driver-web dev",
+    "dev:core": "pnpm --filter @chalo/core dev",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.0",
+    "typescript": "^5.6.0"
+  }
+}

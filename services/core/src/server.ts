@@ -81,7 +81,11 @@ function fail(statusCode: number, code: string, message: string): never {
   throw Object.assign(new Error(message), { statusCode, code });
 }
 
-async function main(): Promise<void> {
+export async function startServer(listenPort = PORT): Promise<{
+  app: ReturnType<typeof Fastify>;
+  storage: Storage;
+  close: () => Promise<void>;
+}> {
   const storage: Storage = await openStorage();
   const sql = storage.sql;
   await runMigrations(sql);
@@ -782,11 +786,21 @@ async function main(): Promise<void> {
     reply.status(status).send({ code, message });
   });
 
-  await app.listen({ port: PORT, host: "127.0.0.1" });
-  console.log(`[core] listening on :${PORT} (storage: ${storage.kind})`);
+  await app.listen({ port: listenPort, host: "127.0.0.1" });
+  console.log(`[core] listening on :${listenPort} (storage: ${storage.kind})`);
+  return {
+    app,
+    storage,
+    close: async () => {
+      await app.close();
+      await storage.close();
+    },
+  };
 }
 
-main().catch((err: unknown) => {
-  console.error("[core] fatal", err);
-  process.exit(1);
-});
+if (process.argv[1]?.replace(/\\/g, "/").endsWith("server.ts")) {
+  startServer().catch((err: unknown) => {
+    console.error("[core] fatal", err);
+    process.exit(1);
+  });
+}

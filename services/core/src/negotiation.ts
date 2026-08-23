@@ -107,9 +107,16 @@ export async function riderFinalOffer(
   const neg = await requireLive(sql, negId);
   const r = rules ?? (await getNegotiationRules(sql, neg.city_id));
   if (neg.round >= r.maxRounds) throw new NegotationError("NEGOTIATION_ROUND_EXCEEDED", "max rounds used");
-  if (finalPaise < neg.current_offer) {
-    // lowering own position is not allowed once countered — decline instead
-    throw new NegotationError("OFFER_MUST_NOT_DECREASE", "final must be ≥ driver counter");
+  const lastRider = await sql.query<{ amount_paise: number }>(
+    "SELECT amount_paise FROM negotiation_events WHERE negotiation_id = $1 AND actor = 'RIDER' ORDER BY id DESC LIMIT 1",
+    [negId],
+  );
+  const minAllowed = lastRider.rows[0]?.amount_paise ?? 0;
+  if (finalPaise < minAllowed) {
+    throw new NegotationError("OFFER_MUST_NOT_DECREASE", "final offer must be ≥ your previous offer");
+  }
+  if (finalPaise >= neg.current_offer) {
+    return riderAcceptCounter(sql, negId);
   }
   return applyCounter(sql, neg, "RIDER", "RIDER_FINAL", finalPaise);
 }

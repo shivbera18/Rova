@@ -5,7 +5,7 @@
  *   /ws/rider /ws/driver             realtime channels (token in query string)
  * Storage: PG when DATABASE_URL set, else embedded PGlite auto-migrated on boot.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
@@ -67,6 +67,14 @@ type DriverConn = { socket: WebSocket };
 const riderConns: Record<string, RiderConn> = {};
 const driverConns: Record<string, DriverConn> = {};
 
+const wsTickets = new Map<string, { session: Session; expiresAt: number }>();
+
+function consumeWsTicket(ticket: string, role: Session["role"]): Session | null {
+  const entry = wsTickets.get(ticket);
+  wsTickets.delete(ticket);
+  if (!entry || entry.expiresAt < Date.now() || entry.session.role !== role) return null;
+  return entry.session;
+}
 function pushRider(riderId: string, msg: RiderWsMessage): void {
   const c = riderConns[riderId];
   if (c && c.socket.readyState === 1) c.socket.send(JSON.stringify(msg));
@@ -108,7 +116,12 @@ export async function startServer(listenPort = PORT): Promise<{
   }
 
   const app = Fastify({ logger: false });
-  await app.register(cors, { origin: true });
+  const allowedOrigins = (process.env.CORS_ORIGIN ?? "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174")
+    .split(",").map((origin) => origin.trim()).filter(Boolean);
+  await app.register(cors, {
+    origin: (origin, callback) => callback(null, !origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)),
+    credentials: false,
+  });
   await app.register(websocket);
 
   app.addHook("onRequest", async (req) => {
@@ -217,7 +230,7 @@ export async function startServer(listenPort = PORT): Promise<{
     if (newPassword) await setUserPassword(sql, user.id, newPassword);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
   });
-  // Password login: first sign-up registers the password; later logins verify it.
+  // Password login is available only after OTP-bound password setup.
   app.post("/v1/auth/login/password", async (req) => {
     const { phone, password, role, vehicleClass } = req.body as {
       phone?: string;
@@ -232,6 +245,13 @@ export async function startServer(listenPort = PORT): Promise<{
     const user = await upsertUserWithPassword(sql, phone!, role!, password);
     if (role === "DRIVER") await ensureDriverVehicle(user.id, vehicleClass);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
+  });
+
+  app.post("/v1/ws/ticket", async (req) => {
+    const sess = requireAuth(await session(req));
+    const ticket = randomUUID();
+    wsTickets.set(ticket, { session: sess, expiresAt: Date.now() + 60_000 });
+    return { ticket, expiresIn: 60 };
   });
   app.post("/v1/quotes", async (req) => {
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
@@ -311,7 +331,7 @@ export async function startServer(listenPort = PORT): Promise<{
       fail(400, "BAD_BODY", "quoteToken, vehicleClass, paymentMethod, pickup, drop required");
     }
     const negotiated = typeof body.offerPaise === "number";
-    const platformContribution = negotiated ? (body.platformFeePaise ?? payload!.pf) : payload!.pf;
+    const platformContribution = negotiated ? (body.platformFeePaise ?? payload.pf) : payload.pf;
     if (negotiated && (!Number.isSafeInteger(body.offerPaise) || body.offerPaise! < 0)) {
       fail(400, "INVALID_OFFER", "driver offer must be non-negative integer paise");
     }
@@ -321,15 +341,22 @@ export async function startServer(listenPort = PORT): Promise<{
     await validateRideRequest(sql, sess.userId, {
       offerPaise: body.offerPaise,
       platformFeePaise: body.platformFeePaise,
-      pickup: body.pickup!,
-      drop: body.drop!,
+      pickup: body.pickup,
+      drop: body.drop,
     });
-    const riderCharge = (negotiated ? body.offerPaise! : payload!.tf) + platformContribution;
+    const riderCharge = (negotiated ? body.offerPaise! : payload.tf) + platformContribution;
     if (body.paymentMethod === "WALLET") {
       const balance = await walletBalance(sql, `user:${sess.userId}:WALLET`);
       if (balance < riderCharge) {
         fail(402, "INSUFFICIENT_WALLET", `Wallet needs ₹${(riderCharge / 100).toFixed(2)}; current balance is ₹${(balance / 100).toFixed(2)}`);
       }
+    }
+    const quoteHash = createHash("sha256").update(body.quoteToken!).digest("hex");
+    try {
+      await sql.query("INSERT INTO quote_token_uses (token_hash,user_id) VALUES ($1,$2)", [quoteHash, sess.userId]);
+    } catch (err: any) {
+      if (err?.code === "23505") fail(409, "QUOTE_ALREADY_USED", "This fare quote was already used; request a fresh quote");
+      throw err;
     }
     const requestId = randomUUID();
     await sql.query(
@@ -799,7 +826,6 @@ export async function startServer(listenPort = PORT): Promise<{
     };
   }
 
-  /** agreement → atomic claim → trip creation → notify both sides. Returns OTP for rider. */
   async function finalizeAgreement(
     requestId: string,
     negotiationId: string,
@@ -879,17 +905,11 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.get("/ws/rider", { websocket: true }, (socket, req) => {
     void (async () => {
-      const token = new URL(req.url ?? "/", "http://x").searchParams.get("token") ?? "";
-      const sess = await verifyToken(token);
-      if (!sess || sess.role !== "RIDER") {
-        socket.close(4401, "unauthorized");
-        return;
-      }
-      const u = await sql.query<{ id: string }>("SELECT id FROM users WHERE id=$1 AND status='ACTIVE'", [sess.userId]);
-      if (u.rows.length === 0) {
-        socket.close(4401, "unauthorized");
-        return;
-      }
+      const ticket = new URL(req.url ?? "/", "http://x").searchParams.get("ticket") ?? "";
+      const sess = consumeWsTicket(ticket, "RIDER");
+      if (!sess) { socket.close(4401, "invalid or expired ticket"); return; }
+      const user = await sql.query<{ id: string }>("SELECT id FROM users WHERE id=$1 AND status='ACTIVE'", [sess.userId]);
+      if (!user.rows[0]) { socket.close(4401, "unauthorized"); return; }
       riderConns[sess.userId] = { socket };
       logger.ws("rider", "Connected", sess.userId);
       socket.on("close", () => {
@@ -903,79 +923,75 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.get("/ws/driver", { websocket: true }, (socket, req) => {
     void (async () => {
-      const token = new URL(req.url ?? "/", "http://x").searchParams.get("token") ?? "";
-      const sess = await verifyToken(token);
-      if (!sess || sess.role !== "DRIVER") {
-        socket.close(4401, "unauthorized");
-        return;
-      }
+      const ticket = new URL(req.url ?? "/", "http://x").searchParams.get("ticket") ?? "";
+      const sess = consumeWsTicket(ticket, "DRIVER");
+      if (!sess) { socket.close(4401, "invalid or expired ticket"); return; }
       const profile = (
         await sql.query<{
-          vehicle_class: string;
-          plate: string;
-          full_name: string;
-          rating_rolling: string | null;
-          last_lat: number | null;
-          last_lng: number | null;
+          vehicle_class: string; plate: string; full_name: string; rating_rolling: string | null;
+          last_lat: number | null; last_lng: number | null;
         }>(
           `SELECT d.vehicle_class, d.plate, u.full_name, u.rating_rolling, d.last_lat, d.last_lng
-           FROM driver_profiles d JOIN users u ON u.id = d.user_id WHERE d.user_id=$1 AND u.status='ACTIVE'`,
+           FROM driver_profiles d JOIN users u ON u.id=d.user_id WHERE d.user_id=$1 AND u.status='ACTIVE'`,
           [sess.userId],
         )
       ).rows[0];
+      if (!profile) { socket.close(4401, "unauthorized"); return; }
 
-      if (!profile) {
-        socket.close(4401, "unauthorized");
-        return;
-      }
+      const oldConnection = driverConns[sess.userId]?.socket;
+      if (oldConnection && oldConnection.readyState === 1) oldConnection.close(4009, "Account opened in another tab");
       driverConns[sess.userId] = { socket };
       logger.ws("driver", "Connected", sess.userId);
 
       registerDriver({
         driverId: sess.userId,
-        vehicleClass: profile.vehicle_class ?? "BIKE",
+        vehicleClass: profile.vehicle_class,
         pos: { lat: profile.last_lat ?? 12.97, lng: profile.last_lng ?? 77.59 },
         online: true,
         onTrip: false,
-        name: profile.full_name ?? "Driver",
-        plate: profile.plate ?? "KA00XX0000",
+        name: profile.full_name,
+        plate: profile.plate,
         rating: Number(profile.rating_rolling ?? 4.8),
         push: (msg) => pushDriver(sess.userId, msg),
       });
 
       socket.on("message", (raw: Buffer) => {
         let msg: { t?: string; lat?: number; lng?: number };
-        try {
-          msg = JSON.parse(raw.toString()) as { t?: string; lat?: number; lng?: number };
-        } catch {
-          return;
-        }
+        try { msg = JSON.parse(raw.toString()); } catch { return; }
         if (msg.t === "pos.update" && typeof msg.lat === "number" && typeof msg.lng === "number") {
           try {
             validateDriverGps(sess.userId, { lat: msg.lat, lng: msg.lng });
             setDriverPos(sess.userId, { lat: msg.lat, lng: msg.lng });
-            void sql.query("UPDATE driver_profiles SET last_lat=$2, last_lng=$3 WHERE user_id=$1", [
-              sess.userId,
-              msg.lat,
-              msg.lng,
-            ]);
-          } catch (err) {
-            logger.warn("FRAUD", `Rejected driver GPS update user=${sess.userId.slice(0, 8)}`, err);
-          }
+            void sql.query("UPDATE driver_profiles SET last_lat=$2,last_lng=$3 WHERE user_id=$1", [sess.userId, msg.lat, msg.lng]);
+          } catch (err) { logger.warn("FRAUD", `Rejected driver GPS update user=${sess.userId.slice(0, 8)}`, err); }
         }
       });
+
       socket.on("close", () => {
-        if (driverConns[sess.userId]?.socket === socket) {
-          delete driverConns[sess.userId];
-          unregisterDriver(sess.userId);
-          logger.ws("driver", "Disconnected", sess.userId);
-        }
+        if (driverConns[sess.userId]?.socket !== socket) return;
+        delete driverConns[sess.userId];
+        unregisterDriver(sess.userId);
+        logger.ws("driver", "Disconnected", sess.userId);
+        setTimeout(() => {
+          if (driverConns[sess.userId]) return;
+          void sql.query<TripRow>(
+            `SELECT t.*,r.payment_method FROM trips t JOIN ride_requests r ON r.id=t.request_id
+             WHERE t.driver_id=$1 AND t.state IN ('DRIVER_ASSIGNED','ARRIVING','ARRIVED')`,
+            [sess.userId],
+          ).then(async ({ rows }) => {
+            for (const trip of rows) {
+              const updated = await transitionTrip(sql, trip.id, "CANCELLED_DRIVER").catch(() => null);
+              if (!updated) continue;
+              pushRider(updated.rider_id, { t: "trip.state", state: "CANCELLED_DRIVER" });
+              void sendPush(sql, updated.rider_id, { title: "Driver disconnected", body: "Your ride was cancelled before pickup. Please search again.", url: "/", tag: `disconnect-${trip.id}` });
+            }
+          });
+        }, 10_000).unref();
       });
     })();
   });
-
   // ---- dev verification endpoints (never in production) ----
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV === "test" || process.env.ENABLE_DEV_ENDPOINTS === "1") {
     app.get("/v1/dev/reconcile", async (req) => {
       const { tripId } = req.query as { tripId?: string };
       const lines = await sql.query<{
@@ -1149,7 +1165,7 @@ export async function startServer(listenPort = PORT): Promise<{
     return { ok: true, status: "IN_REVIEW" };
   });
 
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV === "test" || process.env.ENABLE_DEV_ENDPOINTS === "1") {
     app.post("/v1/driver/onboarding/dev-approve", async (req) => {
       const sess = requireDriver(await session(req));
       await sql.query("UPDATE driver_profiles SET kyc_status='APPROVED' WHERE user_id=$1", [sess.userId]);
@@ -1178,9 +1194,13 @@ export async function startServer(listenPort = PORT): Promise<{
             id: exp.requestId,
             mode: "NEGOTIATED",
             state: "EXPIRED",
-            round: 3,
+            negotiationId: exp.id,
+            currentOfferPaise: exp.currentOffer as never,
+            platformFeePaise: exp.platformFee as never,
+            riderTotalPaise: (exp.currentOffer + exp.platformFee) as never,
+            round: exp.round,
             maxRounds: 3,
-            listPrice: 0 as never,
+            listPrice: exp.listPrice as never,
           },
         });
       }

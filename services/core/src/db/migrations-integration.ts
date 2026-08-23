@@ -31,4 +31,14 @@ export const MIGRATIONS_INTEGRATION = [
     UPDATE driver_profiles SET vehicle_class='BIKE' WHERE vehicle_class='ALL';
     `,
   },
+  {
+    id: "0008_quote_token_uses",
+    sql: `
+    CREATE TABLE IF NOT EXISTS quote_token_uses (
+      token_hash text PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users(id),
+      used_at timestamptz NOT NULL DEFAULT now()
+    );
+    `,
+  },
 ];

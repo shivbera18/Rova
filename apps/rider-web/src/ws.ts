@@ -2,11 +2,7 @@ import { useEffect, useReducer, useRef } from "react";
 import type { RiderWsMessage } from "@chalo/protocol";
 import { getToken } from "./api";
 
-/** Opens the rider WS (via vite proxy); retries until a token exists, reconnects with backoff. */
-export function useRiderSocket(
-  onMessage: (m: RiderWsMessage) => void,
-  onStatus?: (connected: boolean) => void,
-): void {
+export function useRiderSocket(onMessage: (m: RiderWsMessage) => void, onStatus?: (connected: boolean) => void): void {
   const handlerRef = useRef(onMessage);
   const statusRef = useRef(onStatus);
   handlerRef.current = onMessage;
@@ -18,52 +14,38 @@ export function useRiderSocket(
     let backoff = 1000;
     let timerId: ReturnType<typeof setTimeout> | undefined;
 
-    function connect(): void {
+    async function connect(): Promise<void> {
       if (closed) return;
       const token = getToken();
-      // login may happen after mount — keep waiting for a token instead of giving up
-      if (!token) {
-        timerId = setTimeout(connect, 800);
-        return;
-      }
-      const proto = location.protocol === "https:" ? "wss" : "ws";
-      sock = new WebSocket(`${proto}://${location.host}/ws/rider?token=${token}`);
-      sock.onmessage = (ev) => {
-        try {
-          handlerRef.current(JSON.parse(ev.data as string) as RiderWsMessage);
-        } catch {
-          // ignore malformed frames
-        }
-      };
-      sock.onopen = () => {
-        backoff = 1000;
-        statusRef.current?.(true);
-      };
-      sock.onclose = () => {
-        statusRef.current?.(false);
+      if (!token) { timerId = setTimeout(() => void connect(), 800); return; }
+      try {
+        const response = await fetch("/v1/ws/ticket", { method: "POST", headers: { authorization: `Bearer ${token}` } });
+        if (!response.ok) throw new Error("ticket failed");
+        const { ticket } = (await response.json()) as { ticket: string };
         if (closed) return;
-        timerId = setTimeout(connect, backoff);
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        sock = new WebSocket(`${proto}://${location.host}/ws/rider?ticket=${encodeURIComponent(ticket)}`);
+        sock.onmessage = (event) => { try { handlerRef.current(JSON.parse(event.data as string)); } catch {} };
+        sock.onopen = () => { backoff = 1000; statusRef.current?.(true); };
+        sock.onclose = () => { statusRef.current?.(false); if (!closed) { timerId = setTimeout(() => void connect(), backoff); backoff = Math.min(backoff * 2, 15000); } };
+      } catch {
+        statusRef.current?.(false);
+        if (!closed) timerId = setTimeout(() => void connect(), backoff);
         backoff = Math.min(backoff * 2, 15000);
-      };
+      }
     }
 
-    connect();
-    return () => {
-      closed = true;
-      clearTimeout(timerId);
-      sock?.close();
-    };
+    void connect();
+    return () => { closed = true; clearTimeout(timerId); sock?.close(); };
   }, []);
 }
 
-/** Ticking countdown: seconds until ISO timestamp (clamped at 0), re-renders every second. */
 export function useCountdown(expiresAt: string | undefined): number | null {
   const [, force] = useReducer((x: number) => x + 1, 0);
   useEffect(() => {
     if (!expiresAt) return;
-    const iv = setInterval(force, 1000);
-    return () => clearInterval(iv);
+    const interval = setInterval(force, 1000);
+    return () => clearInterval(interval);
   }, [expiresAt]);
-  if (!expiresAt) return null;
-  return Math.max(0, Math.round((Date.parse(expiresAt) - Date.now()) / 1000));
+  return expiresAt ? Math.max(0, Math.round((Date.parse(expiresAt) - Date.now()) / 1000)) : null;
 }

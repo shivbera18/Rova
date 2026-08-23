@@ -100,35 +100,33 @@ export function connectDriverSocket(
 
   const sock: DriverSocket = {
     send: (msg) => ws?.send(JSON.stringify(msg)),
-    get readyState() {
-      return ws?.readyState ?? WebSocket.CLOSED;
-    },
-    close: () => {
-      closed = true;
-      ws?.close();
-    },
+    get readyState() { return ws?.readyState ?? WebSocket.CLOSED; },
+    close: () => { closed = true; ws?.close(); },
   };
 
-  const open = (): void => {
+  const open = async (): Promise<void> => {
     if (closed) return;
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    ws = new WebSocket(`${proto}//${location.host}/ws/driver?token=${encodeURIComponent(token)}`);
-    ws.onopen = () => onStatus(true);
-    ws.onclose = () => {
+    try {
+      const response = await fetch("/v1/ws/ticket", { method: "POST", headers: { authorization: `Bearer ${token}` } });
+      if (!response.ok) throw new Error("ticket failed");
+      const { ticket } = (await response.json()) as { ticket: string };
+      if (closed) return;
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${proto}//${location.host}/ws/driver?ticket=${encodeURIComponent(ticket)}`);
+      ws.onopen = () => onStatus(true);
+      ws.onclose = (event) => {
+        onStatus(false);
+        if (!closed && event.code !== 4009) setTimeout(() => void open(), 2000);
+      };
+      ws.onerror = () => ws?.close();
+      ws.onmessage = (event) => { try { onMessage(JSON.parse(event.data as string) as DriverWsMessage); } catch {} };
+    } catch {
       onStatus(false);
-      if (!closed) setTimeout(open, 2000);
-    };
-    ws.onerror = () => ws?.close();
-    ws.onmessage = (ev) => {
-      try {
-        onMessage(JSON.parse(ev.data as string) as DriverWsMessage);
-      } catch {
-        // ignore malformed frames
-      }
-    };
+      if (!closed) setTimeout(() => void open(), 2000);
+    }
   };
-  open();
+
+  void open();
   return sock;
 }
-
 export type Offer = DriverOfferPayload;

@@ -275,6 +275,7 @@ async function runVerification(): Promise<void> {
   // Dedicated isolated server: never mutate a developer or production database.
   delete process.env.DATABASE_URL;
   process.env.PGLITE_DIR = ":memory:";
+  process.env.NODE_ENV = "test";
   const serverHandle = await startServer(TEST_PORT);
   await seedData(serverHandle.storage.sql);
 
@@ -290,9 +291,11 @@ async function runVerification(): Promise<void> {
   const pickup = { lat: 12.9352, lng: 77.6245 };
   const drop = { lat: 12.9611, lng: 77.6387 };
 
-  // Connect WebSocket clients for both parties
-  const riderWs = await WsClient.connect(`${WS_BASE}/ws/rider?token=${riderToken}`);
-  const driverWs = await WsClient.connect(`${WS_BASE}/ws/driver?token=${driverToken}`);
+  // Connect WebSocket clients with 60-second single-use tickets (JWTs never enter URLs).
+  const riderTicket = await api("/v1/ws/ticket", {}, riderToken);
+  const driverTicket = await api("/v1/ws/ticket", {}, driverToken);
+  const riderWs = await WsClient.connect(`${WS_BASE}/ws/rider?ticket=${riderTicket.json.ticket}`);
+  const driverWs = await WsClient.connect(`${WS_BASE}/ws/driver?ticket=${driverTicket.json.ticket}`);
   driverWs.send({ t: "pos.update", lat: pickup.lat, lng: pickup.lng });
   await new Promise((r) => setTimeout(r, 400));
 
@@ -479,9 +482,17 @@ async function runVerification(): Promise<void> {
 
     const cancelRes = await api(`/v1/requests/${reqRes.json.sessionId}/cancel`, {}, riderToken);
     assert(cancelRes.status === 200 && cancelRes.json.ok === true, "Rider cancelled active negotiation request");
-
     const checkReq = await api(`/v1/requests/${reqRes.json.sessionId}`, undefined, riderToken);
     assert(checkReq.json.state === "CANCELLED", "Request transitioned to CANCELLED state");
+    const replay = await api("/v1/requests", {
+      quoteToken: bikeQuote.quoteToken,
+      offerPaise: 2500,
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+    }, riderToken);
+    assert(replay.status === 409 && replay.json.code === "QUOTE_ALREADY_USED", "Signed quote token cannot be replayed");
   }
 
   // --- Scenario F: Driver Cancellation of Assigned Trip ---

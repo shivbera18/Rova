@@ -133,36 +133,37 @@ export async function cancelByRider(sql: SqlRowClient, negId: string): Promise<N
 /** Periodic sweeper: marks negotiations with expires_at < now() as EXPIRED. */
 export async function sweepExpiredNegotiations(
   sql: SqlRowClient,
-): Promise<Array<{ id: string; requestId: string; riderId: string }>> {
+): Promise<Array<{
+  id: string; requestId: string; riderId: string; round: number;
+  listPrice: number; currentOffer: number; platformFee: number;
+}>> {
   const expired = await sql.query<{
-    id: string;
-    request_id: string;
-    rider_id: string;
-    state: string;
-    round: number;
+    id: string; request_id: string; rider_id: string; state: string; round: number;
+    list_price: number; current_offer: number; platform_fee: number;
   }>(
     `UPDATE negotiations
      SET state='EXPIRED', version=version+1
-     WHERE state IN ('BROADCASTING','COUNTERED_DRIVER','COUNTERED_RIDER')
-       AND expires_at < now()
-     RETURNING id, request_id, rider_id, state, round`,
+     WHERE state IN ('BROADCASTING','COUNTERED_DRIVER','COUNTERED_RIDER') AND expires_at < now()
+     RETURNING id,request_id,rider_id,state,round,list_price,current_offer,platform_fee`,
   );
   for (const row of expired.rows) {
     await appendEvent(sql, row.id, "SYSTEM", "EXPIRE", null, row.round);
-    await publish(TOPICS.negotiationEvent, {
-      negotiationId: row.id,
-      action: "EXPIRE",
-      from: row.state,
-      to: "EXPIRED",
-    });
+    await publish(TOPICS.negotiationEvent, { negotiationId: row.id, action: "EXPIRE", from: row.state, to: "EXPIRED" });
     await sql.query(
-      "UPDATE ride_requests SET state='EXPIRED', version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING')",
+      "UPDATE ride_requests SET state='EXPIRED',version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING')",
       [row.request_id],
     );
   }
-  return expired.rows.map((r) => ({ id: r.id, requestId: r.request_id, riderId: r.rider_id }));
+  return expired.rows.map((row) => ({
+    id: row.id,
+    requestId: row.request_id,
+    riderId: row.rider_id,
+    round: row.round,
+    listPrice: Number(row.list_price),
+    currentOffer: Number(row.current_offer),
+    platformFee: Number(row.platform_fee ?? 0),
+  }));
 }
-
 // ---- internals ---------------------------------------------------------------
 
 async function requireLive(sql: SqlRowClient, negId: string): Promise<NegotiationRow> {

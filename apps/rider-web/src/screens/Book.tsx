@@ -25,8 +25,12 @@ type Phase =
 const PAY_METHODS = ["UPI", "WALLET", "CASH"] as const;
 // must match the server's offerStageTtlS so the countdown bar hits 0 at real expiry
 const MATCH_TOTAL_S = 45;
-
 const POPULAR_ROUTES: Array<{ label: string; pickup: LatLon; drop: LatLon }> = [
+  {
+    label: "⚡ Koramangala ➔ Jayanagar",
+    pickup: { lat: 12.9352, lng: 77.6245 },
+    drop: { lat: 12.9308, lng: 77.5838 },
+  },
   {
     label: "⚡ Koramangala ➔ Indiranagar",
     pickup: { lat: 12.9352, lng: 77.6245 },
@@ -45,9 +49,10 @@ const POPULAR_ROUTES: Array<{ label: string; pickup: LatLon; drop: LatLon }> = [
 ];
 
 function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem("chalox.rider.token");
   return {
     "content-type": "application/json",
-    authorization: `Bearer ${localStorage.getItem("chalox.rider.token") ?? ""}`,
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
   };
 }
 
@@ -178,15 +183,17 @@ export default function Book(): React.ReactElement {
     }, 2000);
     return () => clearInterval(iv);
   }, [phase.k, phase.k === "matching" ? phase.session.sessionId : null]);
-
   async function fetchQuotes(a: LatLon, b: LatLon): Promise<Quote[]> {
     const res = await fetch("/v1/quotes", {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ pickup: a, drop: b }),
     });
-    const json = (await res.json()) as { quotes?: Quote[] };
-    if (!json.quotes || json.quotes.length === 0) throw new Error("No vehicle classes available here");
+    const json = (await res.json()) as { quotes?: Quote[]; message?: string };
+    if (!res.ok) {
+      throw new Error(json.message || `Failed to fetch fares (${res.status})`);
+    }
+    if (!json.quotes || json.quotes.length === 0) throw new Error("No vehicle classes available for this route");
     return json.quotes;
   }
 

@@ -205,3 +205,20 @@ All P0 and P1 findings above have now been addressed:
 | D6 Chime gesture | AudioContext unlocks on the driver’s Go Online gesture. |
 
 The original evidence remains above for historical context; this table reflects the current implementation.
+
+### Second-pass hardening completed
+
+- JWTs no longer appear in WebSocket URLs; clients mint 60-second one-shot tickets.
+- Quote tokens are consumed once and replay attempts return `QUOTE_ALREADY_USED`.
+- Password authentication requires an OTP-bound account and OTP-time password setup.
+- Demo credentials are gated behind development builds.
+- Production CORS uses an explicit allow-list and dev endpoints require an explicit flag/test mode.
+- Driver GPS teleport checks remain enforced.
+- Pre-start trips cancel after a disconnected driver misses the reconnect grace window.
+- Duplicate driver WebSocket sessions are rejected with code `4009`.
+- Expired negotiation payloads now contain truthful round, list, driver, and platform amounts.
+- Driver earnings exclude cancelled trips; rider receipts show cancelled rides as not charged.
+- Zero-value offers use neutral “Rider’s offer / Free ride” copy.
+- Driver logout, rider landing navigation, cancel confirmation, final-offer clamping, and OTP copy affordance ship.
+- `/healthz`, graceful shutdown, production secret validation, CSP, PWA manifests/offline shells, focus rings, reduced-motion support, and bounded log rotation ship.
+- The unused `ioredis` dependency was removed.

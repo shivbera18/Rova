@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { LatLon } from "@chalo/protocol";
-import { formatINR, negotiatedQuote, paisa } from "@chalo/protocol";
+import { formatINR, paisa } from "@chalo/protocol";
 import type { RequestSessionView, Quote } from "../api";
 import { createRequest } from "../api";
 
 export const EXPLAINER_COPY =
-  "You can offer any amount — even ₹0. But this small fee keeps Chalo-X running: servers, support, insurance and fair dispatch.";
+  "This contribution funds Chalo-X servers, dispatch, support and safety. You may change it — even to ₹0 — before sending your offer.";
 
 const VEHICLE_META: Record<string, { label: string; icon: string; seats: string }> = {
   BIKE_LITE: { label: "Bike Lite", icon: "🛵", seats: "1 seat" },
@@ -24,15 +24,9 @@ export function vehicleIcon(vc: string): string {
   return VEHICLE_META[vc]?.icon ?? "🚗";
 }
 
-/** Fee preview for an arbitrary rider offer, anchored to the list-price quote's fee. */
-function riderTotalPreview(offerPaise: number, quote: Quote): number {
-  const list = {
-    listPrice: paisa(quote.listPrice),
-    tripFare: paisa(quote.tripFare),
-    platformFee: paisa(quote.platformFeePaise),
-    surgeMultiplier: 1,
-  };
-  return negotiatedQuote(paisa(offerPaise), list).riderTotal;
+function paiseFromInput(value: string): number {
+  const rupees = Number(value);
+  return Number.isFinite(rupees) && rupees >= 0 ? Math.round(rupees * 100) : -1;
 }
 
 export default function OfferSheet({
@@ -50,15 +44,16 @@ export default function OfferSheet({
   onClose: () => void;
   onBooked: (session: RequestSessionView) => void;
 }): React.ReactElement {
-  const [rupeesInput, setRupeesInput] = useState<string>((quote.softFloor / 100).toFixed(0));
+  const [driverInput, setDriverInput] = useState((quote.softFloor / 100).toFixed(0));
+  const [platformInput, setPlatformInput] = useState((quote.platformFeePaise / 100).toFixed(2));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const customRupees = Number(rupeesInput);
-  const offerValid = Number.isFinite(customRupees) && customRupees >= 0;
-  const offerPaise = Math.round(customRupees * 100);
-  const totalPreview = riderTotalPreview(offerPaise, quote);
-  const savingsVsList = quote.listPrice - totalPreview;
+  const driverPaise = paiseFromInput(driverInput);
+  const platformPaise = paiseFromInput(platformInput);
+  const amountsValid = driverPaise >= 0 && platformPaise >= 0;
+  const totalPaise = Math.max(0, driverPaise) + Math.max(0, platformPaise);
+  const savingsVsList = quote.listPrice - totalPaise;
   const meta = VEHICLE_META[quote.vehicleClass] ?? { label: quote.vehicleClass, icon: "🚗", seats: "4 seats" };
 
   async function submit(negotiate: boolean): Promise<void> {
@@ -69,7 +64,12 @@ export default function OfferSheet({
         quoteToken: quote.quoteToken,
         vehicleClass: quote.vehicleClass as never,
         paymentMethod: payMethod as never,
-        ...(negotiate ? { offerPaise } : {}),
+        ...(negotiate
+          ? {
+              offerPaise: driverPaise,
+              platformFeePaise: platformPaise,
+            }
+          : {}),
         pickup,
         drop,
       });
@@ -80,132 +80,120 @@ export default function OfferSheet({
     }
   }
 
-  const listRupees = quote.listPrice / 100;
-
   return (
-    <div className="card panel-card">
-      <div className="spread" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 22 }}>{meta.icon}</span>
+    <section className="card panel-card fare-builder">
+      <div className="spread">
+        <div className="row" style={{ gap: 10 }}>
+          <span className="vehicle-big-icon">{meta.icon}</span>
           <div>
-            <strong style={{ fontSize: 16 }}>{meta.label}</strong>
-            <div style={{ fontSize: 11, color: "var(--muted)" }}>{meta.seats} · {quote.distanceKm} km · ~{quote.etaMin} min away</div>
+            <h3 style={{ fontSize: 18, textTransform: "none" }}>{meta.label}</h3>
+            <small className="muted">{meta.seats} · {quote.distanceKm} km · ~{quote.etaMin} min</small>
           </div>
         </div>
-        <button className="btn-ghost" style={{ padding: "6px 10px" }} onClick={onClose} aria-label="Close">
-          ✕
-        </button>
+        <button className="btn-ghost compact" onClick={onClose} aria-label="Close">×</button>
       </div>
 
-      <div className="fee-line" style={{ marginTop: 12 }}>
-        <span>Standard List: <strong>{formatINR(paisa(quote.listPrice))}</strong></span>
-        <i className="info-dot" tabIndex={0}>
-          ℹ
-          <span className="info-tip">{EXPLAINER_COPY}</span>
-        </i>
+      <div className="standard-fare-banner">
+        <span>STANDARD ESTIMATE</span>
+        <strong>{formatINR(paisa(quote.listPrice))}</strong>
       </div>
 
-      <div className="step-label" style={{ marginTop: 14 }}>
-        Select or Enter Your Offer (Down to ₹0):
+      <div className="fare-builder-title">
+        <span className="eyebrow">BUILD YOUR OFFER</span>
+        <h3>Choose where your money goes</h3>
+        <p>Both parts are editable. The driver sees only their take-home amount.</p>
       </div>
 
-      {/* Quick discount buttons */}
-      <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-        <button
-          type="button"
-          className={`chip ${rupeesInput === Math.round(listRupees * 0.9).toString() ? "selected" : ""}`}
-          onClick={() => setRupeesInput(Math.round(listRupees * 0.9).toString())}
-        >
-          -10% (₹{Math.round(listRupees * 0.9)})
-        </button>
-        <button
-          type="button"
-          className={`chip ${rupeesInput === Math.round(listRupees * 0.75).toString() ? "selected" : ""}`}
-          onClick={() => setRupeesInput(Math.round(listRupees * 0.75).toString())}
-        >
-          -25% (₹{Math.round(listRupees * 0.75)})
-        </button>
-        <button
-          type="button"
-          className={`chip ${rupeesInput === Math.round(listRupees * 0.5).toString() ? "selected" : ""}`}
-          onClick={() => setRupeesInput(Math.round(listRupees * 0.5).toString())}
-        >
-          -50% (₹{Math.round(listRupees * 0.5)})
-        </button>
-        <button
-          type="button"
-          className={`chip ${rupeesInput === "0" ? "selected" : ""}`}
-          onClick={() => setRupeesInput("0")}
-        >
-          🎁 ₹0 (Free)
-        </button>
-        <button
-          type="button"
-          className={`chip ${rupeesInput === listRupees.toString() ? "selected" : ""}`}
-          onClick={() => setRupeesInput(listRupees.toString())}
-        >
-          List (₹{listRupees})
-        </button>
-      </div>
-
-      {/* Direct Rupee Input */}
-      <div className="row" style={{ marginTop: 6 }}>
-        <span style={{ fontWeight: 800, fontSize: 18, color: "var(--accent-light)" }}>₹</span>
-        <input
-          inputMode="decimal"
-          value={rupeesInput}
-          onChange={(e) => setRupeesInput(e.target.value.replace(/[^0-9.]/g, ""))}
-          aria-label="Offer amount in rupees"
-          placeholder="0"
-          style={{ fontSize: 18, fontWeight: 800 }}
-        />
-      </div>
-
-      <div className="fare-box" style={{ marginTop: 12, padding: "10px 12px" }}>
-        <div className="fare-line">
-          <span>Driver Take-Home</span>
-          <span style={{ color: "var(--accent-light)", fontWeight: 700 }}>{formatINR(paisa(offerPaise))}</span>
-        </div>
-        <div className="fare-line muted">
-          <span>
-            Platform Fee (Keeps Lights On){" "}
-            <i className="info-dot" tabIndex={0}>
-              ℹ
-              <span className="info-tip">{EXPLAINER_COPY}</span>
-            </i>
-          </span>
-          <span>{formatINR(paisa(quote.platformFeePaise))}</span>
-        </div>
-        <div className="fare-line fare-total">
-          <span>You Pay Total</span>
-          <span style={{ color: "#fff", fontWeight: 800 }}>{formatINR(paisa(totalPreview))}</span>
-        </div>
-        {savingsVsList > 0 && (
-          <div className="ok-text">
-            ✓ You save {formatINR(paisa(savingsVsList))} vs list price!
+      <div className="fare-control driver-control">
+        <div className="fare-control-head">
+          <span className="fare-control-icon">🛵</span>
+          <div>
+            <strong>Driver take-home</strong>
+            <small>100% goes to your driver</small>
           </div>
-        )}
+          <span className="brut-badge brut-badge-green">NEGOTIABLE</span>
+        </div>
+        <div className="money-input">
+          <span>₹</span>
+          <input
+            aria-label="Amount going to driver"
+            inputMode="decimal"
+            value={driverInput}
+            onChange={(e) => setDriverInput(e.target.value.replace(/[^0-9.]/g, ""))}
+          />
+        </div>
+        <div className="amount-chips">
+          {[0, 0.5, 0.75, 0.9, 1].map((ratio) => {
+            const amount = Math.round((quote.tripFare / 100) * ratio);
+            return (
+              <button key={ratio} type="button" onClick={() => setDriverInput(String(amount))}>
+                {ratio === 0 ? "₹0" : ratio === 1 ? `Full ₹${amount}` : `${Math.round(ratio * 100)}% · ₹${amount}`}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {error && (
-        <div className="error-text" style={{ marginTop: 10 }}>
-          {error}
+      <div className="fare-control platform-control">
+        <div className="fare-control-head">
+          <span className="fare-control-icon">⚡</span>
+          <div>
+            <strong>Platform contribution</strong>
+            <small>Servers, dispatch, support & safety</small>
+          </div>
+          <i className="info-dot" tabIndex={0}>i<span className="info-tip">{EXPLAINER_COPY}</span></i>
+          <span className="brut-badge brut-badge-yellow">NEGOTIABLE</span>
         </div>
-      )}
+        <div className="money-input">
+          <span>₹</span>
+          <input
+            aria-label="Platform contribution"
+            inputMode="decimal"
+            value={platformInput}
+            onChange={(e) => setPlatformInput(e.target.value.replace(/[^0-9.]/g, ""))}
+          />
+        </div>
+        <div className="amount-chips">
+          {[0, 0.5, 1, 1.5].map((ratio) => {
+            const amount = Math.round((quote.platformFeePaise / 100) * ratio * 100) / 100;
+            return (
+              <button key={ratio} type="button" onClick={() => setPlatformInput(String(amount))}>
+                {ratio === 0 ? "₹0" : ratio === 1 ? `Suggested ₹${amount}` : `${ratio}× · ₹${amount}`}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="net-total-card">
+        <div>
+          <span>YOUR NET TOTAL</span>
+          <strong>{formatINR(paisa(totalPaise))}</strong>
+        </div>
+        <div className="net-breakdown">
+          <span>Driver {formatINR(paisa(Math.max(0, driverPaise)))}</span>
+          <b>+</b>
+          <span>Platform {formatINR(paisa(Math.max(0, platformPaise)))}</span>
+        </div>
+        {savingsVsList > 0 && <small>You save {formatINR(paisa(savingsVsList))} vs standard estimate</small>}
+        {savingsVsList < 0 && <small className="generous">You contribute {formatINR(paisa(-savingsVsList))} above estimate</small>}
+      </div>
+
+      {error && <div className="error-text">{error}</div>}
 
       <div className="row" style={{ marginTop: 14 }}>
         <button
           className="btn-primary"
           style={{ flex: 1 }}
-          disabled={busy || !offerValid}
+          disabled={busy || !amountsValid}
           onClick={() => void submit(true)}
         >
-          Offer {formatINR(paisa(offerPaise))} & Negotiate
+          Send {formatINR(paisa(totalPaise))} Offer
         </button>
         <button className="btn-ghost" disabled={busy} onClick={() => void submit(false)}>
-          Book at List
+          Book standard
         </button>
       </div>
-    </div>
+    </section>
   );
 }

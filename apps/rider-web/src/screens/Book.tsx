@@ -381,14 +381,19 @@ export default function Book(): React.ReactElement {
                   <span style={{ fontSize: 20 }}>{vehicleIcon(q.vehicleClass)}</span>
                   <div>
                     <div>{vehicleLabel(q.vehicleClass)}</div>
-                    <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
-                      {q.distanceKm} km · ~{q.etaMin} min
+                    <div style={{ fontSize: 11, color: "var(--ink-soft)", fontWeight: 600 }}>
+                      {q.distanceKm} km · {q.etaMin} min ETA
+                      {q.trafficLevel && (
+                        <span className={`traffic-chip ${q.trafficLevel.toLowerCase()}`}>
+                          {q.trafficLevel === "HEAVY" ? "Heavy traffic" : q.trafficLevel === "MODERATE" ? "Moderate traffic" : "Light traffic"}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div className="quote-price">{formatINR(paisa(q.listPrice))}</div>
-                  <div style={{ fontSize: 10.5, color: "var(--teal)", fontWeight: 700 }}>Negotiable</div>
+                  <div style={{ fontSize: 10.5, color: "var(--teal)", fontWeight: 800 }}>Both parts negotiable</div>
                 </div>
               </button>
             ))}
@@ -414,10 +419,24 @@ export default function Book(): React.ReactElement {
             <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800 }}>
               {phase.session.mode === "NEGOTIATED" ? "⚡ Broadcasting Offer…" : "Finding Drivers…"}
             </h3>
-            <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            <div className="matching-offer-summary">
+              <div>
+                <span>NET OFFER</span>
+                <strong>{formatINR(paisa(Number(phase.session.riderTotalPaise ?? phase.session.currentOfferPaise ?? 0)))}</strong>
+              </div>
+              <div>
+                <span>TO DRIVER</span>
+                <strong>{formatINR(paisa(Number(phase.session.currentOfferPaise ?? 0)))}</strong>
+              </div>
+              <div>
+                <span>PLATFORM</span>
+                <strong>{formatINR(paisa(Number(phase.session.platformFeePaise ?? 0)))}</strong>
+              </div>
+            </div>
+            <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
               {phase.session.mode === "NEGOTIATED"
-                ? `Your ${formatINR(paisa(Number(phase.session.currentOfferPaise ?? 0)))} offer is broadcasting to nearby drivers.`
-                : "Broadcasting at list price."}
+                ? "Your split offer is broadcasting. The driver sees their take-home amount."
+                : "Broadcasting at the standard estimate."}
             </p>
 
             <div className="progress-track">
@@ -437,10 +456,10 @@ export default function Book(): React.ReactElement {
             {phase.counter && (
               <CounterModal
                 counter={phase.counter}
-                quote={phase.quote}
                 vehicleClass={phase.quote?.vehicleClass ?? ""}
+                platformFeePaise={phase.session.platformFeePaise ?? phase.quote?.platformFeePaise ?? 0}
                 onClose={() => setPhase((p) => (p.k === "matching" ? { ...p, counter: null } : p))}
-                onResolved={(o) => void onCounterResolved(o)}
+                onResolved={(outcome) => void onCounterResolved(outcome)}
               />
             )}
 

@@ -55,6 +55,9 @@ export async function api<T>(
 export interface Quote {
   vehicleClass: string;
   etaMin: number;
+  freeFlowEtaMin?: number;
+  trafficLevel?: "LOW" | "MODERATE" | "HEAVY";
+  routeSource?: "OSRM" | "HAVERSINE_FALLBACK";
   distanceKm: number;
   listPrice: number;
   tripFare: number;
@@ -62,13 +65,14 @@ export interface Quote {
   softFloor: number;
   quoteToken: string;
 }
-
 export interface RequestSessionView {
   sessionId: string;
   mode: "LIST" | "NEGOTIATED";
   state: "MATCHING" | "NEGOTIATING" | "AGREED" | "EXPIRED" | "DECLINED" | "CANCELLED";
   negotiationId?: string;
   currentOfferPaise?: number;
+  platformFeePaise?: number;
+  riderTotalPaise?: number;
   round: number;
   maxRounds: number;
   expiresAt?: string;
@@ -111,10 +115,11 @@ export interface TripView {
 }
 
 /** Wire body uses plain numbers; the branded Paise lives inside @chalo/protocol types. */
-export type CreateRequestBody = Omit<CreateRequest, "offerPaise"> & {
+export type CreateRequestBody = Omit<CreateRequest, "offerPaise" | "platformFeePaise"> & {
   pickup: LatLon;
   drop: LatLon;
   offerPaise?: number;
+  platformFeePaise?: number;
 };
 
 export function createRequest(r: CreateRequestBody): Promise<RequestSessionView> {
@@ -127,9 +132,12 @@ export function createRequest(r: CreateRequestBody): Promise<RequestSessionView>
 export function riderAccept(negotiationId: string): Promise<{ tripId: string }> {
   return api(`/v1/negotiations/${negotiationId}/rider-accept`, { body: {} });
 }
-
-export function riderFinal(negotiationId: string, paise: number): Promise<{ state: string; round: number }> {
-  return api(`/v1/negotiations/${negotiationId}/final`, { body: { paise } });
+export function riderFinal(
+  negotiationId: string,
+  paise: number,
+  platformFeePaise: number,
+): Promise<{ state: string; round: number }> {
+  return api(`/v1/negotiations/${negotiationId}/final`, { body: { paise, platformFeePaise } });
 }
 
 export function riderDecline(negotiationId: string): Promise<{ ok: boolean }> {

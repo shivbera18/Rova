@@ -35,8 +35,9 @@ export interface QuoteResponse {
 
 /** POST /v1/requests — offer omitted = list-price dispatch */
 export interface CreateRequest {
-  quoteToken: string;      // signed short-lived quote reference
-  offerPaise?: Paise;      // present ⇒ NEGOTIATED mode
+  quoteToken: string;       // signed short-lived quote reference
+  offerPaise?: Paise;       // negotiated driver take-home; present ⇒ NEGOTIATED mode
+  platformFeePaise?: Paise; // rider's negotiated platform contribution (₹0 allowed)
   vehicleClass: VehicleClass;
   paymentMethod: PaymentMethod;
 }
@@ -47,6 +48,8 @@ export interface RequestSession {
   state: "MATCHING" | "NEGOTIATING" | "AGREED" | "EXPIRED" | "DECLINED" | "CANCELLED";
   negotiationId?: string;
   currentOfferPaise?: Paise;
+  platformFeePaise?: Paise;
+  riderTotalPaise?: Paise;
   round: number;
   maxRounds: number;
   expiresAt?: string;

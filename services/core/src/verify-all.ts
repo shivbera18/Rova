@@ -169,10 +169,12 @@ async function runVerification(): Promise<void> {
     assert(quote.tripFare >= 2500, "Calculated fare satisfies min_fare constraint");
     assert(quote.listPrice === quote.tripFare + quote.platformFeePaise, "List price equals tripFare + platformFee");
 
-    // Quote token signing and verification
     const token = issueQuoteToken({
       vehicleClass: "BIKE",
       etaMin: 12,
+      freeFlowEtaMin: 10,
+      trafficLevel: "MODERATE",
+      routeSource: "OSRM",
       distanceKm: 5.0,
       listPrice: quote.listPrice,
       tripFare: quote.tripFare,
@@ -270,7 +272,8 @@ async function runVerification(): Promise<void> {
   // =========================================================================
   console.log("\n--- 6. End-to-End Realtime API Scenarios ---");
 
-  // Start dedicated test server on port 8085 with in-memory database
+  // Dedicated isolated server: never mutate a developer or production database.
+  delete process.env.DATABASE_URL;
   process.env.PGLITE_DIR = ":memory:";
   const serverHandle = await startServer(TEST_PORT);
   await seedData(serverHandle.storage.sql);
@@ -342,16 +345,20 @@ async function runVerification(): Promise<void> {
     const counterWaiter = riderWs.waitFor((m) => m.t === "negotiation.counter");
     const assignedWaiter = riderWs.waitFor((m) => m.t === "driver.assigned");
 
-    const riderOffer = Math.round(bikeQuote.listPrice * 0.5); // 50% discount offer
+    const riderOffer = Math.round(bikeQuote.listPrice * 0.5);
+    const platformContribution = 125; // ₹1.25, independently negotiated from driver pay
     const reqRes = await api("/v1/requests", {
       quoteToken: bikeQuote.quoteToken,
       offerPaise: riderOffer,
+      platformFeePaise: platformContribution,
       vehicleClass: "BIKE",
       paymentMethod: "UPI",
       pickup,
       drop,
     }, riderToken);
     assert(reqRes.status === 200 && reqRes.json.mode === "NEGOTIATED", "Negotiated request created in NEGOTIATING state");
+    assert(reqRes.json.platformFeePaise === platformContribution, "Rider platform contribution is independently negotiable");
+    assert(reqRes.json.riderTotalPaise === riderOffer + platformContribution, "Net total equals driver pay plus platform contribution");
 
     const offer = await offerWaiter;
     assert(offer.offer.takeHomePaise === riderOffer, "Driver receives rider offer as pure take-home pay");
@@ -370,6 +377,7 @@ async function runVerification(): Promise<void> {
 
     const assigned = await assignedWaiter;
     assert(assigned.trip.fareBreakdown.agreedPaise === driverCounterAsk, "Trip fare breakdown reflects agreed counter amount");
+    assert(assigned.trip.fareBreakdown.platformFeePaise === platformContribution, "Trip snapshot preserves negotiated platform contribution");
 
     // Finish trip
     await api(`/v1/trips/${assigned.trip.id}/state`, { to: "ARRIVING" }, driverToken);
@@ -407,7 +415,11 @@ async function runVerification(): Promise<void> {
 
     // Rider sends final offer (splitting difference)
     const riderFinalAsk = riderOffer + 1200;
-    const finalRes = await api(`/v1/negotiations/${reqRes.json.negotiationId}/final`, { paise: riderFinalAsk }, riderToken);
+    const finalRes = await api(
+      `/v1/negotiations/${reqRes.json.negotiationId}/final`,
+      { paise: riderFinalAsk, platformFeePaise: bikeQuote.platformFeePaise },
+      riderToken,
+    );
     assert(finalRes.status === 200 && finalRes.json.state === "COUNTERED_RIDER", "Rider final offer submitted (round 2)");
 
     const finalOfferMsg = await finalOfferWaiter;

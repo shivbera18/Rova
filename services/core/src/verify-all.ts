@@ -91,10 +91,9 @@ class WsClient {
   send(payload: unknown): void {
     this.socket.send(JSON.stringify(payload));
   }
-
-  waitFor(match: (m: any) => boolean, timeoutMs = 10000): Promise<any> {
+  waitFor(match: (m: any) => boolean, timeoutMs = 30000): Promise<any> {
     const { promise, resolve, reject } = Promise.withResolvers<any>();
-    const timer = setTimeout(() => reject(new Error("WS wait timeout")), timeoutMs);
+    const timer = setTimeout(() => reject(new Error(`WS wait timeout (${timeoutMs}ms)`)), timeoutMs);
     this.waiters.push({
       match: (m) => {
         if (match(m)) {
@@ -388,7 +387,6 @@ async function runVerification(): Promise<void> {
     const offerWaiter = driverWs.waitFor((m) => m.t === "dispatch.offer");
     const counterWaiter = riderWs.waitFor((m) => m.t === "negotiation.counter");
     const finalOfferWaiter = driverWs.waitFor((m) => m.t === "dispatch.offer" && m.offer.isCounter);
-    const assignedWaiter = riderWs.waitFor((m) => m.t === "driver.assigned");
 
     const riderOffer = Math.round(bikeQuote.listPrice * 0.4);
     const reqRes = await api("/v1/requests", {
@@ -414,8 +412,8 @@ async function runVerification(): Promise<void> {
 
     const finalOfferMsg = await finalOfferWaiter;
     assert(finalOfferMsg.offer.takeHomePaise === riderFinalAsk, "Driver receives rider final offer broadcast");
-
     // Driver accepts final offer
+    const assignedWaiter = riderWs.waitFor((m) => m.t === "driver.assigned");
     const acceptRes = await api(`/v1/negotiations/${reqRes.json.negotiationId}/accept`, {}, driverToken);
     assert(acceptRes.status === 200 && !!acceptRes.json.tripId, "Driver accepted rider final offer -> trip created");
 

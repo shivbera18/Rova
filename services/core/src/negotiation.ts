@@ -129,6 +129,39 @@ export async function cancelByRider(sql: SqlRowClient, negId: string): Promise<N
   return transition(sql, negId, "RIDER_CANCEL", null);
 }
 
+/** Periodic sweeper: marks negotiations with expires_at < now() as EXPIRED. */
+export async function sweepExpiredNegotiations(
+  sql: SqlRowClient,
+): Promise<Array<{ id: string; requestId: string; riderId: string }>> {
+  const expired = await sql.query<{
+    id: string;
+    request_id: string;
+    rider_id: string;
+    state: string;
+    round: number;
+  }>(
+    `UPDATE negotiations
+     SET state='EXPIRED', version=version+1
+     WHERE state IN ('BROADCASTING','COUNTERED_DRIVER','COUNTERED_RIDER')
+       AND expires_at < now()
+     RETURNING id, request_id, rider_id, state, round`,
+  );
+  for (const row of expired.rows) {
+    await appendEvent(sql, row.id, "SYSTEM", "EXPIRE", null, row.round);
+    await publish(TOPICS.negotiationEvent, {
+      negotiationId: row.id,
+      action: "EXPIRE",
+      from: row.state,
+      to: "EXPIRED",
+    });
+    await sql.query(
+      "UPDATE ride_requests SET state='EXPIRED', version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING')",
+      [row.request_id],
+    );
+  }
+  return expired.rows.map((r) => ({ id: r.id, requestId: r.request_id, riderId: r.rider_id }));
+}
+
 // ---- internals ---------------------------------------------------------------
 
 async function requireLive(sql: SqlRowClient, negId: string): Promise<NegotiationRow> {
@@ -136,6 +169,22 @@ async function requireLive(sql: SqlRowClient, negId: string): Promise<Negotiatio
   if (!neg) throw new NegotationError("NOT_FOUND", "negotiation does not exist");
   if (!["BROADCASTING", "COUNTERED_DRIVER", "COUNTERED_RIDER"].includes(neg.state)) {
     throw new NegotationError("INVALID_STATE", `not live: ${neg.state}`);
+  }
+  // Lazy expiry check
+  if (new Date(neg.expires_at).getTime() < Date.now()) {
+    await sql.query(
+      `UPDATE negotiations SET state='EXPIRED', version=version+1
+       WHERE id=$1 AND state IN ('BROADCASTING','COUNTERED_DRIVER','COUNTERED_RIDER')`,
+      [neg.id],
+    );
+    await appendEvent(sql, neg.id, "SYSTEM", "EXPIRE", null, neg.round);
+    await publish(TOPICS.negotiationEvent, {
+      negotiationId: neg.id,
+      action: "EXPIRE",
+      from: neg.state,
+      to: "EXPIRED",
+    });
+    throw new NegotationError("EXPIRED", "negotiation has expired");
   }
   return neg;
 }
@@ -186,11 +235,12 @@ async function applyCounter(
   const rules = await getNegotiationRules(sql, neg.city_id);
   const nextState = canTransition(neg.state, action);
   if (!nextState) throw new NegotationError("ILLEGAL_TRANSITION", `${action} from ${neg.state}`);
-  if (neg.round >= rules.maxRounds && action === "RIDER_FINAL") {
-    throw new NegotationError("NEGOTIATION_ROUND_EXCEEDED", "max rounds used");
+
+  const nextRound = action === "RIDER_FINAL" ? neg.round + 1 : neg.round;
+  if (nextRound > rules.maxRounds) {
+    throw new NegotationError("NEGOTIATION_ROUND_EXCEEDED", `maximum ${rules.maxRounds} rounds reached`);
   }
 
-  const nextRound = action === "DRIVER_COUNTER" ? neg.round : neg.round;
   const expiresAt = expiresFor(nextState, rules);
   const updated = await sql.query<NegotiationRow>(
     `UPDATE negotiations

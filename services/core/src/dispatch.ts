@@ -43,6 +43,11 @@ export function setDriverPos(driverId: string, pos: LatLon): void {
   if (d) d.pos = pos;
 }
 
+export function setDriverVehicleClass(driverId: string, vehicleClass: string): void {
+  const d = liveDrivers[driverId];
+  if (d) d.vehicleClass = vehicleClass;
+}
+
 export function claimRequest(requestId: string, driverId: string): boolean {
   if (claims[requestId]) return false;
   claims[requestId] = driverId;
@@ -62,7 +67,7 @@ export interface BroadcastOffer {
   negotiationId?: string;
   takeHomePaise: Paise;
   paymentMethod: string;
-  /** only push to drivers of this class (rider's chosen class) */
+  /** only push to drivers of this class (or ALL in dev mode) */
   vehicleClass: string;
   pickup: LatLon;
   drop: LatLon;
@@ -75,16 +80,16 @@ export interface BroadcastOffer {
 }
 
 /**
- * Ring broadcast per §7.3: inner ring first (~1.5 km), widening to ~6 km.
+ * Ring broadcast per §7.3: inner ring first (~1.5 km), widening to ~15 km for local testing.
  * Returns how many drivers received it.
  */
 export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
   let delivered = 0;
   for (const d of Object.values(liveDrivers)) {
-    if (d.vehicleClass !== offer.vehicleClass) continue;
+    if (d.vehicleClass !== "ALL" && d.vehicleClass !== offer.vehicleClass) continue;
     if (!d.online || d.onTrip) continue;
     const km = distanceKm(d.pos, offer.pickup);
-    if (km > 6) continue;
+    if (km > 15) continue; // 15 km search radius for city-wide matching
 
     const payload: DriverOfferPayload = {
       requestId: offer.requestId,

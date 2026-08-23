@@ -39,6 +39,7 @@ import {
   registerDriver,
   releaseClaim,
   setDriverPos,
+  setDriverVehicleClass,
   unregisterDriver,
 } from "./dispatch.ts";
 import {
@@ -101,7 +102,6 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!header?.startsWith("Bearer ")) return null;
     return verifyToken(header.slice(7));
   }
-
   async function requireApprovedDriver(driverId: string, vehicleClass?: string): Promise<void> {
     const r = await sql.query<{ kyc_status: string; vehicle_class: string }>(
       "SELECT kyc_status, vehicle_class FROM driver_profiles WHERE user_id=$1",
@@ -111,7 +111,7 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!p || p.kyc_status !== "APPROVED") {
       fail(403, "KYC_NOT_APPROVED", "Driver account is not KYC approved");
     }
-    if (vehicleClass && p.vehicle_class !== vehicleClass) {
+    if (vehicleClass && p.vehicle_class !== "ALL" && p.vehicle_class !== vehicleClass) {
       fail(403, "VEHICLE_CLASS_MISMATCH", `Driver vehicle (${p.vehicle_class}) does not match ride (${vehicleClass})`);
     }
   }
@@ -730,14 +730,28 @@ export async function startServer(listenPort = PORT): Promise<{
   app.post("/v1/driver/status", async (req) => {
     const sess = await session(req);
     if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
-    const { online } = req.body as { online?: boolean };
-    if (typeof online !== "boolean") fail(400, "BAD_BODY", "online boolean required");
-    await sql.query("UPDATE driver_profiles SET online=$2 WHERE user_id=$1", [sess.userId, online]);
-    const live = getLiveDriver(sess.userId);
-    if (live) live.online = online;
-    return { online };
+    const body = req.body as { online?: boolean; vehicleClass?: string; lat?: number; lng?: number };
+    if (typeof body.online === "boolean") {
+      await sql.query("UPDATE driver_profiles SET online=$2 WHERE user_id=$1", [sess.userId, body.online]);
+      const live = getLiveDriver(sess.userId);
+      if (live) live.online = body.online;
+    }
+    if (typeof body.vehicleClass === "string") {
+      await sql.query("UPDATE driver_profiles SET vehicle_class=$2 WHERE user_id=$1", [sess.userId, body.vehicleClass]);
+      setDriverVehicleClass(sess.userId, body.vehicleClass);
+    }
+    if (typeof body.lat === "number" && typeof body.lng === "number") {
+      await sql.query("UPDATE driver_profiles SET last_lat=$2, last_lng=$3 WHERE user_id=$1", [sess.userId, body.lat, body.lng]);
+      setDriverPos(sess.userId, { lat: body.lat, lng: body.lng });
+    }
+    const updated = (
+      await sql.query<{ vehicle_class: string; online: boolean; last_lat: number; last_lng: number }>(
+        "SELECT vehicle_class, online, last_lat, last_lng FROM driver_profiles WHERE user_id=$1",
+        [sess.userId],
+      )
+    ).rows[0];
+    return { profile: updated };
   });
-
   app.post("/v1/trips/:id/cancel-driver", async (req) => {
     const sess = await session(req);
     if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");

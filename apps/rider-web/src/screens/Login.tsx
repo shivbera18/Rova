@@ -1,212 +1,160 @@
 import { useState } from "react";
+import type { AuthSession } from "@chalo/protocol";
+import { setToken } from "../api";
 import { useNavigate } from "react-router-dom";
-import { api, ApiError, getToken, setToken } from "../api";
 
 type Mode = "OTP" | "PASSWORD";
 type Step = "PHONE" | "OTP";
 
 export default function Login({ onAuth }: { onAuth: () => void }): React.ReactElement {
-  const navigate = useNavigate();
-  const [mode, setMode] = useState<Mode>("OTP");
+  const [mode] = useState<Mode>("OTP");
+  const [step, setStep] = useState<Step>("PHONE");
   const [phone, setPhone] = useState(import.meta.env.DEV ? "+919900000001" : "");
   const [otp, setOtp] = useState("");
-  const [password, setPassword] = useState("");
+  const [password] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      let token: string | undefined;
       if (mode === "PASSWORD") {
-        const res = await api<{ token?: string }>("/v1/auth/login/password", {
-          body: { phone, password, role: "RIDER" },
+        const res = await fetch("/v1/auth/login/password", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ phone, password, role: "RIDER" }),
         });
-        token = res.token;
-      } else if (!sent) {
-        await api("/v1/auth/otp/send", { body: { phone } });
-        setSent(true);
+        const json = (await res.json()) as AuthSession & { message?: string };
+        if (!res.ok) throw new Error(json.message || "Invalid credentials");
+        setToken(json.token);
+        onAuth();
+      } else if (step === "PHONE") {
+        const res = await fetch("/v1/auth/otp/send", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ phone }),
+        });
+        const json = (await res.json()) as { devHint?: string; message?: string };
+        if (!res.ok) throw new Error(json.message || "Failed to send code");
+        if (json.devHint) setOtp(json.devHint);
+        setStep("OTP");
       } else {
-        const res = await api<{ token: string }>("/v1/auth/otp/verify", {
-          body: { phone, otp, role: "RIDER", ...(newPassword.length >= 4 ? { newPassword } : {}) },
+        const res = await fetch("/v1/auth/otp/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ phone, otp, role: "RIDER", ...(newPassword ? { newPassword } : {}) }),
         });
-        token = res.token;
+        const json = (await res.json()) as AuthSession & { message?: string };
+        if (!res.ok) throw new Error(json.message || "Invalid OTP code");
+        setToken(json.token);
+        onAuth();
       }
-      if (!token) throw new ApiError(400, "NO_TOKEN", "Sign-in did not return a session — try OTP mode.");
-      setToken(token);
-      localStorage.setItem("chalox.rider.seenLanding", "1");
-      onAuth();
-      navigate("/", { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Authentication error");
     } finally {
       setBusy(false);
     }
   }
 
-  const canSubmit =
-    !busy &&
-    phone.length >= 6 &&
-    (mode === "PASSWORD" ? password.length >= 4 : sent ? otp.length >= 6 : true);
-
   return (
-    <div
-      style={{
-        minHeight: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-        position: "relative",
-        overflowY: "auto",
-      }}
-    >
-      {/* decorative brutal shapes */}
-      <div aria-hidden style={{ position: "absolute", top: -40, right: -60, width: 200, height: 200, background: "var(--blue)", border: "3px solid var(--ink)", borderRadius: "50%", boxShadow: "8px 8px 0 var(--ink)" }} />
-      <div aria-hidden style={{ position: "absolute", bottom: -50, left: -40, width: 170, height: 170, background: "var(--pink)", border: "3px solid var(--ink)", borderRadius: "50%", boxShadow: "6px 6px 0 var(--ink)" }} />
-
-      <div className="brut-card" style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 2 }}>
-        <div className="spread" style={{ marginBottom: 6 }}>
-          <h1 style={{ fontSize: 30 }}>
-            CHALO<span style={{ color: "var(--blue)" }}>-X</span>
-          </h1>
-          <span className="brut-badge brut-badge-yellow">RIDER</span>
+    <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "var(--paper)" }}>
+      <div className="brut-card" style={{ width: "100%", maxWidth: 420, padding: 32, background: "#ffffff", boxShadow: "var(--shadow-lg)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <span style={{ fontSize: 28 }}>🚗</span>
+          <div>
+            <h1 style={{ fontSize: 24, textTransform: "uppercase" }}>Rider Sign-In</h1>
+            <span className="brut-badge brut-badge-primary">NAME YOUR FARE</span>
+          </div>
         </div>
-        <p className="muted" style={{ fontWeight: 700, marginBottom: 18 }}>
-          Name your price. Riders set the fare — drivers decide.
+
+        <p style={{ color: "var(--ink-soft)", fontWeight: 500, fontSize: 13.5, marginBottom: 20 }}>
+          {step === "PHONE"
+            ? "Enter your phone number to receive an instant verification code"
+            : `Enter 6-digit OTP sent to ${phone}`}
         </p>
 
-        <div className="brut-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "OTP"}
-            className={`brut-tab ${mode === "OTP" ? "active" : ""}`}
-            onClick={() => {
-              setMode("OTP");
-              setError(null);
-            }}
-          >
-            📱 OTP Login
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "PASSWORD"}
-            className={`brut-tab ${mode === "PASSWORD" ? "active" : ""}`}
-            onClick={() => {
-              setMode("PASSWORD");
-              setError(null);
-            }}
-          >
-            🔒 Password
-          </button>
-        </div>
+        {error && (
+          <div className="error-text" style={{ marginBottom: 16 }}>
+            ⚠️ {error}
+          </div>
+        )}
 
-        <form onSubmit={(e) => void submit(e)} noValidate>
-          <label className="step-label" htmlFor="phone">
-            Phone number
-          </label>
-          <input
-            id="phone"
-            className="brut-input"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+919876543210"
-            autoComplete="tel"
-          />
-          {mode === "OTP" && sent && (
+        <form onSubmit={submit} noValidate>
+          {step === "PHONE" && (
             <>
-              <label className="step-label" htmlFor="otp">
-                Enter OTP {import.meta.env.DEV && <span className="pill">dev: 123456</span>}
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+                Phone Number
               </label>
               <input
-                id="otp"
                 className="brut-input"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-                placeholder="••••••"
-                inputMode="numeric"
+                type="tel"
+                placeholder="+91..."
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                style={{ marginBottom: 16 }}
                 autoFocus
               />
-              <label className="step-label" htmlFor="new-password">Create password (optional)</label>
+            </>
+          )}
+
+          {step === "OTP" && (
+            <>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+                Verification OTP
+              </label>
               <input
-                id="new-password"
+                className="brut-input"
+                type="text"
+                placeholder="123456"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                style={{ marginBottom: 16 }}
+                autoFocus
+              />
+
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+                Set Password (Optional)
+              </label>
+              <input
                 className="brut-input"
                 type="password"
+                placeholder="Optional login password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="At least 4 characters"
-                autoComplete="new-password"
+                style={{ marginBottom: 16 }}
               />
             </>
           )}
 
-          {mode === "PASSWORD" && (
-            <>
-              <label className="step-label" htmlFor="password">Password</label>
-              <input
-                id="password"
-                className="brut-input"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Your password"
-                autoComplete="current-password"
-                autoFocus
-              />
-              <div className="ok-text" style={{ marginTop: 10 }}>
-                Verify this phone with OTP once to create a password.
-              </div>
-            </>
-          )}
-
-          {error && <div className="error-text">{error}</div>}
-
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="brut-btn brut-btn-primary brut-btn-full"
-            style={{ marginTop: 16, fontSize: 16 }}
-          >
-            {busy
-              ? "Please wait…"
-              : mode === "PASSWORD"
-                ? "🔒 Sign in with password"
-                : sent
-                  ? "✅ Verify & sign in"
-                  : "📲 Send OTP"}
+          <button className="brut-btn brut-btn-primary brut-btn-full" type="submit" disabled={busy}>
+            {busy ? "Authenticating..." : step === "PHONE" ? "Get Login Code →" : "Verify & Book Rides 🚀"}
           </button>
 
-          {mode === "OTP" && sent && (
+          {step === "OTP" && (
             <button
               type="button"
               className="brut-btn brut-btn-white brut-btn-full"
               style={{ marginTop: 10, fontSize: 12.5 }}
               disabled={busy}
-              onClick={() => setSent(false)}
+              onClick={() => setStep("PHONE")}
             >
               ← Use a different number
             </button>
           )}
         </form>
 
-        {!getToken() && (
-          <button
-            type="button"
-            className="brut-btn brut-btn-white brut-btn-full"
-            onClick={() => {
-              localStorage.removeItem("chalox.rider.seenLanding");
-              window.location.assign("/");
-            }}
-          >
-            ← Back to home
-          </button>
-        )}
+        <button
+          type="button"
+          className="brut-btn brut-btn-white brut-btn-full"
+          style={{ marginTop: 14, fontSize: 12.5 }}
+          onClick={() => navigate("/")}
+        >
+          ← Back to Home
+        </button>
       </div>
     </div>
   );

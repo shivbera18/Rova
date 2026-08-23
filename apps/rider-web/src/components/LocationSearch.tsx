@@ -40,6 +40,7 @@ export function LocationSearch({
     setOpen(false);
     setResults([]);
   }, [value]);
+
   useEffect(() => {
     const trimmed = query.trim();
     if (suppressSearchRef.current) {
@@ -61,7 +62,7 @@ export function LocationSearch({
         q: trimmed,
         format: "jsonv2",
         addressdetails: "1",
-        limit: "7",
+        limit: "6",
         countrycodes: "in",
       });
       void fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
@@ -84,6 +85,7 @@ export function LocationSearch({
         })
         .finally(() => setLoading(false));
     }, 350);
+
     return () => clearTimeout(timer);
   }, [query, value]);
 
@@ -101,11 +103,53 @@ export function LocationSearch({
     });
   }
 
+  const isPickup = kind === "pickup";
+
   return (
-    <div className={`location-search ${kind} ${open ? "open" : ""}`}>
-      <span className={`location-dot ${kind}`} aria-hidden />
-      <div className="location-field">
-        <label htmlFor={`${kind}-search`}>{kind === "pickup" ? "Pickup" : "Drop-off"}</label>
+    <div
+      style={{
+        position: "relative",
+        background: "#ffffff",
+        border: "var(--brut-border)",
+        borderRadius: "var(--radius-sm)",
+        boxShadow: "var(--shadow-xs)",
+        padding: "10px 14px",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        transition: "border-color 0.12s, box-shadow 0.12s",
+      }}
+      className={open ? "open" : ""}
+    >
+      {/* Visual Indicator Dot */}
+      <span
+        style={{
+          width: 14,
+          height: 14,
+          flex: "0 0 14px",
+          borderRadius: isPickup ? "50%" : "3px",
+          background: isPickup ? "var(--green)" : "var(--pink)",
+          border: "2px solid var(--ink)",
+          display: "inline-block",
+        }}
+        aria-hidden
+      />
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <label
+          htmlFor={`${kind}-search`}
+          style={{
+            display: "block",
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "var(--ink-muted)",
+            marginBottom: 2,
+          }}
+        >
+          {isPickup ? "Pickup Location" : "Drop-off Destination"}
+        </label>
         <input
           id={`${kind}-search`}
           value={query}
@@ -117,14 +161,25 @@ export function LocationSearch({
           placeholder={placeholder}
           autoComplete="off"
           spellCheck={false}
-          aria-autocomplete="list"
+          style={{
+            width: "100%",
+            border: 0,
+            outline: 0,
+            background: "transparent",
+            fontFamily: "var(--font-body)",
+            fontSize: 14.5,
+            fontWeight: 600,
+            color: "var(--ink)",
+            padding: 0,
+          }}
         />
       </div>
+
       {loading && <span className="search-spinner" aria-label="Searching" />}
+
       {query && !loading && (
         <button
           type="button"
-          className="search-clear"
           aria-label={`Clear ${kind}`}
           onClick={() => {
             abortRef.current?.abort();
@@ -134,27 +189,93 @@ export function LocationSearch({
             setOpen(false);
             onClear();
           }}
+          style={{
+            width: 22,
+            height: 22,
+            display: "grid",
+            placeItems: "center",
+            borderRadius: "50%",
+            border: "1.5px solid var(--ink)",
+            background: "var(--paper-subtle)",
+            color: "var(--ink)",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: 800,
+            padding: 0,
+          }}
         >
           ×
         </button>
       )}
 
+      {/* Autocomplete Dropdown */}
       {open && (
-        <div className="search-results" role="listbox">
+        <div
+          className="search-results"
+          style={{
+            position: "absolute",
+            zIndex: 1200,
+            left: -2,
+            right: -2,
+            top: "calc(100% + 6px)",
+            background: "#ffffff",
+            border: "var(--brut-border)",
+            borderRadius: "var(--radius-sm)",
+            boxShadow: "var(--shadow-md)",
+            maxHeight: 260,
+            overflowY: "auto",
+          }}
+          role="listbox"
+        >
           {results.length > 0 ? (
             results.map((result) => (
-              <button key={result.place_id} type="button" role="option" onClick={() => choose(result)}>
-                <span className="place-icon">{result.type === "house" ? "⌂" : "⌖"}</span>
-                <span>
-                  <strong>{result.display_name.split(",")[0]}</strong>
-                  <small>{result.display_name.split(",").slice(1, 4).join(",")}</small>
+              <button
+                key={result.place_id}
+                type="button"
+                role="option"
+                onClick={() => choose(result)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  textAlign: "left",
+                  padding: "10px 12px",
+                  background: "transparent",
+                  border: 0,
+                  borderBottom: "1px solid #f1f5f9",
+                  cursor: "pointer",
+                }}
+              >
+                <span
+                  style={{
+                    width: 26,
+                    height: 26,
+                    display: "grid",
+                    placeItems: "center",
+                    background: "var(--primary-soft)",
+                    borderRadius: "var(--radius-xs)",
+                    border: "var(--brut-border-thin)",
+                    fontSize: 12,
+                  }}
+                >
+                  {result.type === "house" ? "🏠" : "📍"}
+                </span>
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <strong style={{ display: "block", fontSize: 13, color: "var(--ink)" }}>
+                    {result.display_name.split(",")[0]}
+                  </strong>
+                  <small style={{ display: "block", color: "var(--ink-muted)", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {result.display_name.split(",").slice(1, 4).join(",")}
+                  </small>
                 </span>
               </button>
             ))
           ) : (
-            <div className="search-empty">No matching places. Try a landmark or neighbourhood.</div>
+            <div style={{ padding: 14, fontSize: 12.5, fontWeight: 600, color: "var(--ink-muted)", textAlign: "center" }}>
+              No matching locations found
+            </div>
           )}
-          <div className="search-attribution">Search by OpenStreetMap</div>
         </div>
       )}
     </div>

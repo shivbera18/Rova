@@ -1,18 +1,28 @@
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import * as ReactDOMClient from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
 import App from "./App";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
+const container = document.getElementById("root");
+if (container) {
+  const createRootFn =
+    typeof (ReactDOMClient as any).createRoot === "function"
+      ? (ReactDOMClient as any).createRoot
+      : (ReactDOMClient as any).default?.createRoot;
 
+  if (typeof createRootFn === "function") {
+    const root = createRootFn(container);
+    root.render(
+      <StrictMode>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </StrictMode>,
+    );
+  }
+}
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"));

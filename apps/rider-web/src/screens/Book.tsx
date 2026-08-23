@@ -6,6 +6,7 @@ import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet"
 import { LocationSearch, type SelectedPlace } from "../components/LocationSearch";
 import CounterModal, { type DriverCounter } from "../components/CounterModal";
 import { useCountdown, useRiderSocket } from "../ws";
+import { NeoCard, NeoButton, NeoBadge } from "../components/NeoComponents";
 import {
   addTripTip,
   cancelMatchedTrip,
@@ -44,7 +45,6 @@ function readRoutes(key: string): StoredRoute[] {
 }
 
 const PAY_METHODS = ["UPI", "WALLET", "CASH"] as const;
-// must match the server's offerStageTtlS so the countdown bar hits 0 at real expiry
 const MATCH_TOTAL_S = 45;
 const POPULAR_ROUTES: Array<{ label: string; pickup: LatLon; drop: LatLon }> = [
   {
@@ -85,115 +85,93 @@ function stateLabel(s: string): string {
     case "ARRIVED":
       return "Driver has arrived at pickup";
     case "ONGOING":
-      return "On your ride";
+      return "On trip to destination";
     case "COMPLETED":
-      return "Ride Completed";
+      return "Trip completed";
     case "CANCELLED_RIDER":
-      return "You cancelled this ride";
     case "CANCELLED_DRIVER":
-      return "Driver cancelled this ride";
+      return "Trip cancelled";
     default:
       return s;
   }
 }
 
 export default function Book(): React.ReactElement {
-  const [pickup, setPickup] = useState<LatLon | null>(null);
-  const [drop, setDrop] = useState<LatLon | null>(null);
   const [phase, setPhase] = useState<Phase>({ k: "pick" });
-  const [payMethod, setPayMethod] = useState<(typeof PAY_METHODS)[number]>("UPI");
-  const [loadingQuotes, setLoadingQuotes] = useState(false);
+  const [pickup, setPickup] = useState<LatLon | null>(null);
   const [pickupLabel, setPickupLabel] = useState("");
+  const [drop, setDrop] = useState<LatLon | null>(null);
   const [dropLabel, setDropLabel] = useState("");
+  const [payMethod, setPayMethod] = useState<"UPI" | "WALLET" | "CASH">("UPI");
+  const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tipPaise, setTipPaise] = useState(0);
-  const [rated, setRated] = useState(false);
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [liveDriverPos, setLiveDriverPos] = useState<LatLon | null>(null);
   const [savedRoutes, setSavedRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.savedRoutes"));
   const [recentRoutes, setRecentRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.recentRoutes"));
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [showCounterModal, setShowCounterModal] = useState(false);
+  const [activeDriverCounter, setActiveDriverCounter] = useState<DriverCounter | null>(null);
+  const [rated, setRated] = useState(false);
+  const [ratingVal, setRatingVal] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+  const [tipPaise, setTipPaise] = useState(0);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [cancelConfirm, setCancelConfirm] = useState(false);
-
-  const routeRef = useRef<{ pickup: LatLon | null; drop: LatLon | null }>({ pickup: null, drop: null });
-  routeRef.current = { pickup, drop };
-  const lastQuotes = useRef<Quote[]>([]);
-  if (phase.k === "quotes") lastQuotes.current = phase.quotes;
-
-  function stopPoll(): void {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = null;
-  }
-
-  const refreshCompleted = useCallback(async (tripId: string): Promise<void> => {
-    try {
-      const t = await getTrip(tripId);
-      if (t.state === "COMPLETED") setPhase({ k: "done", trip: t });
-      else setPhase((p) => (p.k === "trip" ? { ...p, trip: t } : p));
-    } catch {}
-  }, []);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   useEffect(() => {
-    void getWallet().then((w) => setWalletBalance(w.balancePaise)).catch(() => undefined);
-    void listTrips()
-      .then(async ({ trips }) => {
-        const active = trips.find((trip) => !["COMPLETED", "CANCELLED_RIDER", "CANCELLED_DRIVER"].includes(trip.state));
-        if (!active) return;
-        let recovered = active;
-        if (["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(active.state) && !active.otp) {
-          const result = await regenerateTripOtp(active.id);
-          recovered = { ...active, otp: result.otp };
-        }
-        setPhase({ k: "trip", trip: recovered });
-      })
+    void getWallet()
+      .then((w) => setWalletBalance(w.balancePaise))
       .catch(() => undefined);
   }, []);
 
-  async function submitFeedback(stars: number, trip: TripView): Promise<void> {
-    try {
-      if (tipPaise > 0) await addTripTip(trip.id, tipPaise);
-      await rateTrip(trip.id, { stars, comment: selectedTag ?? undefined });
-      setRated(true);
-      if (tipPaise > 0) {
-        setPhase((p) => p.k === "done" ? { ...p, trip: { ...p.trip, fareBreakdown: { ...p.trip.fareBreakdown, tipPaise } } } : p);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not submit feedback");
-    }
-  }
+  const [counterCount, setCounterCount] = useState(0);
+  const [counterRound, setCounterRound] = useState(1);
+  const [counterExpiresAt, setCounterExpiresAt] = useState<string | null>(null);
+  const countdownSeconds = useCountdown(counterExpiresAt);
 
-  // Realtime WebSocket messages
-  function onMessage(m: RiderWsMessage): void {
-    if (m.t === "negotiation.counter") {
-      setPhase((p) =>
-        p.k === "matching"
-          ? {
-              ...p,
-              counter: { negotiationId: m.negotiationId, paise: m.paise, round: m.round, expiresAt: m.expiresAt },
-            }
-          : p,
-      );
-      return;
-    }
-    if (m.t === "driver.assigned") {
-      stopPoll();
+  const handleWsMessage = useCallback((msg: RiderWsMessage) => {
+    if (msg.t === "request.updated") {
+      setPhase((prev) => {
+        if (prev.k !== "matching") return prev;
+        return { ...prev, session: msg.session as unknown as RequestSessionView };
+      });
+    } else if (msg.t === "negotiation.counter") {
+      setCounterCount((c) => c + 1);
+      setCounterRound(msg.round);
+      setCounterExpiresAt(msg.expiresAt);
+      setActiveDriverCounter({
+        negotiationId: msg.negotiationId,
+        counterPaise: msg.paise,
+        round: msg.round,
+        expiresAt: msg.expiresAt,
+      });
+      setShowCounterModal(true);
+    } else if (msg.t === "driver.assigned") {
+      setShowCounterModal(false);
+      setActiveDriverCounter(null);
       setTipPaise(0);
       setRated(false);
-      setPhase({ k: "trip", trip: m.trip as unknown as TripView });
-      return;
-    }
-    if (m.t === "trip.state" && m.state === "COMPLETED") {
-      setPhase((p) => {
-        if (p.k !== "trip") return p;
-        void refreshCompleted(p.trip.id);
-        return p;
+      setPhase({ k: "trip", trip: msg.trip });
+    } else if (msg.t === "trip.location") {
+      setLiveDriverPos({ lat: msg.lat, lng: msg.lng });
+    } else if (msg.t === "trip.state") {
+      setPhase((prev) => {
+        if (prev.k !== "trip") return prev;
+        const updated = { ...prev.trip, state: msg.state };
+        return msg.state === "COMPLETED" ? { k: "done", trip: updated } : { ...prev, trip: updated };
       });
     }
-  }
-  useRiderSocket(onMessage, setWsConnected);
+  }, []);
 
-  // Poll assigned trip for position & state
+  const { connected: wsConnected } = useRiderSocket(handleWsMessage);
+
+  const pollRef = useRef<number | null>(null);
+  const stopPoll = useCallback(() => {
+    if (pollRef.current !== null) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (phase.k !== "trip") return;
     const id = phase.trip.id;
@@ -202,8 +180,6 @@ export default function Book(): React.ReactElement {
         .then((t) => {
           setPhase((p) => {
             if (p.k !== "trip") return p;
-            // GET /v1/trips/:id never includes the OTP (only the WS assignment does);
-            // keep showing it instead of letting it vanish on the first poll
             const merged = { ...t, otp: t.otp ?? p.trip.otp };
             return merged.state === "COMPLETED" ? { k: "done", trip: merged } : { ...p, trip: merged };
           });
@@ -213,37 +189,6 @@ export default function Book(): React.ReactElement {
     return () => clearInterval(iv);
   }, [phase.k, phase.k === "trip" ? phase.trip.id : null]);
 
-  // Polling safety net while matching
-  useEffect(() => {
-    if (phase.k !== "matching") return;
-    const id = phase.session.sessionId;
-    const iv = setInterval(() => {
-      void fetch(`/v1/requests/${id}`, { headers: authHeaders() })
-        .then((r) => r.json() as Promise<{ state?: string; trip?: { id: string } | null }>)
-        .then(async (j) => {
-          if (j.trip?.id && j.state === "AGREED") {
-            stopPoll();
-            let t = await getTrip(j.trip.id);
-            if (["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(t.state) && !t.otp) {
-              const recovered = await regenerateTripOtp(t.id);
-              t = { ...t, otp: recovered.otp };
-            }
-            setTipPaise(0);
-            setRated(false);
-            setPhase({ k: "trip", trip: t });
-          }
-          if (j.state === "EXPIRED" || j.state === "DECLINED" || j.state === "CANCELLED") {
-            setPhase((p) =>
-              p.k === "matching"
-                ? { ...p, session: { ...p.session, state: j.state as RequestSessionView["state"] } }
-                : p,
-            );
-          }
-        })
-        .catch(() => undefined);
-    }, 2000);
-    return () => clearInterval(iv);
-  }, [phase.k, phase.k === "matching" ? phase.session.sessionId : null]);
   async function fetchQuotes(a: LatLon, b: LatLon): Promise<Quote[]> {
     const res = await fetch("/v1/quotes", {
       method: "POST",
@@ -301,23 +246,6 @@ export default function Book(): React.ReactElement {
     localStorage.setItem("chalox.recentRoutes", JSON.stringify(next));
   }
 
-  function saveCurrentRoute(): void {
-    if (!pickup || !drop) return;
-    const from = pickupLabel || "Pinned pickup";
-    const to = dropLabel || "Pinned drop-off";
-    const route: StoredRoute = {
-      id: `${pickup.lat},${pickup.lng}:${drop.lat},${drop.lng}`,
-      label: `${from} → ${to}`,
-      pickupLabel: from,
-      dropLabel: to,
-      pickup,
-      drop,
-    };
-    const next = [route, ...savedRoutes.filter((r) => r.id !== route.id)].slice(0, 8);
-    setSavedRoutes(next);
-    localStorage.setItem("chalox.savedRoutes", JSON.stringify(next));
-  }
-
   async function selectStoredRoute(route: StoredRoute): Promise<void> {
     setPickup(route.pickup);
     setPickupLabel(route.pickupLabel);
@@ -344,6 +272,7 @@ export default function Book(): React.ReactElement {
       await loadQuotesForRoute(pickup, place.position);
     }
   }
+
   async function selectPopularRoute(route: typeof POPULAR_ROUTES[0]): Promise<void> {
     const from = route.label.split("➔")[0]?.replace("⚡", "").trim() ?? "Pickup";
     const to = route.label.split("➔")[1]?.trim() ?? "Drop-off";
@@ -354,6 +283,7 @@ export default function Book(): React.ReactElement {
     rememberRecent(route.pickup, route.drop, from, to);
     await loadQuotesForRoute(route.pickup, route.drop);
   }
+
   function reset(): void {
     stopPoll();
     setPickup(null);
@@ -361,60 +291,48 @@ export default function Book(): React.ReactElement {
     setDrop(null);
     setDropLabel("");
     setError(null);
-    setRated(false);
-    setTipPaise(0);
-    setSelectedTag(null);
     setPhase({ k: "pick" });
   }
-  async function onCounterResolved(outcome: "accepted" | "declined" | "final"): Promise<void> {
-    if (outcome === "accepted") return;
-    if (outcome === "declined") {
-      setPhase((p) => (p.k === "matching" ? { ...p, counter: null } : p));
-      return;
-    }
-    setPhase((p) => (p.k === "matching" ? { ...p, counter: null } : p));
-  }
-
-  const matchingSession = phase.k === "matching" ? phase.session : null;
-  const secsLeft = useCountdown(matchingSession?.expiresAt);
-
-  const driverPos: LatLon | null =
-    phase.k === "trip" && phase.trip.driverLat != null && phase.trip.driverLng != null
-      ? { lat: phase.trip.driverLat, lng: phase.trip.driverLng }
-      : null;
 
   return (
     <div className="book-wrap">
+      {!wsConnected && (
+        <div className="connection-banner">
+          <span>⚡ Live updates reconnecting...</span>
+        </div>
+      )}
+
       <div className="map-layer">
-        <MapView pickup={pickup} drop={drop} driver={driverPos} onMapClick={(ll) => void onMapClick(ll)} />
+        <MapView
+          pickup={pickup}
+          drop={drop}
+          driverPos={liveDriverPos}
+          onMapClick={onMapClick}
+        />
       </div>
 
       <div className="side-panel">
-        {!wsConnected && (phase.k === "matching" || phase.k === "trip") && (
-          <div className="connection-banner">⚠ Reconnecting live updates… REST recovery remains active.</div>
-        )}
         {error && (
-          <div className="card panel-card">
-            <div className="error-text" style={{ marginBottom: 10 }}>{error}</div>
-            <button className="btn-ghost" onClick={reset}>
-              Start over
-            </button>
+          <div className="error-text" style={{ marginBottom: 12 }}>
+            ⚠️ {error}
           </div>
         )}
 
+        {/* Phase 1: Pickup / Drop Routing Sheet */}
         {phase.k === "pick" && (
-          <section className="booking-sheet">
-            <div className="booking-sheet-head">
-              <div>
-                <span className="eyebrow">BOOK A RIDE</span>
-                <h2>Where are you going?</h2>
-                <p>Search an address, choose a saved route, or pin both points on the map.</p>
-              </div>
-              <span className="brut-badge brut-badge-green">LIVE FARES</span>
+          <NeoCard elevation="md" className="booking-sheet">
+            <div className="spread" style={{ marginBottom: 4 }}>
+              <span className="eyebrow">BOOK A RIDE</span>
+              <NeoBadge variant="green">LIVE FARES</NeoBadge>
             </div>
+            <h2 style={{ fontSize: 24, fontWeight: 900, textTransform: "none", marginBottom: 6 }}>
+              Where are you going?
+            </h2>
+            <p style={{ color: "var(--ink-soft)", fontSize: 13, fontWeight: 500, marginBottom: 16 }}>
+              Search an address, choose a quick route, or pin points on the map.
+            </p>
 
             <div className="route-search-stack">
-              <div className="route-connector" aria-hidden />
               <LocationSearch
                 kind="pickup"
                 value={pickupLabel}
@@ -458,7 +376,7 @@ export default function Book(): React.ReactElement {
               ◎ Use my current location
             </button>
 
-            <div className="booking-divider"><span>POPULAR</span></div>
+            <div className="booking-divider"><span>POPULAR ROUTES</span></div>
             <div className="quick-places-row">
               {POPULAR_ROUTES.map((r) => (
                 <button key={r.label} type="button" className="saved-route" onClick={() => void selectPopularRoute(r)}>
@@ -468,332 +386,190 @@ export default function Book(): React.ReactElement {
               ))}
             </div>
 
-            {savedRoutes.length > 0 && (
-              <>
-                <div className="booking-divider"><span>SAVED</span></div>
-                <div className="quick-places-row">
-                  {savedRoutes.map((route) => (
-                    <button key={route.id} type="button" className="saved-route saved" onClick={() => void selectStoredRoute(route)}>
-                      <span>★</span><small>{route.label}</small>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
             {recentRoutes.length > 0 && (
               <>
                 <div className="booking-divider"><span>RECENT</span></div>
                 <div className="quick-places-row">
                   {recentRoutes.slice(0, 3).map((route) => (
-                    <button key={route.id} type="button" className="saved-route recent" onClick={() => void selectStoredRoute(route)}>
-                      <span>↻</span><small>{route.label}</small>
+                    <button key={route.id} type="button" className="saved-route" onClick={() => void selectStoredRoute(route)}>
+                      <span>↻</span>
+                      <small>{route.label}</small>
                     </button>
                   ))}
                 </div>
               </>
             )}
+
             <div className="booking-options">
               <div>
-                <span className="option-label">Payment</span>
-                <div className="row">
+                <span className="option-label">PAYMENT METHOD</span>
+                <div className="payment-group">
                   {PAY_METHODS.map((pm) => (
-                    <button key={pm} className={`payment-pill ${payMethod === pm ? "selected" : ""}`} onClick={() => setPayMethod(pm)}>
+                    <button
+                      key={pm}
+                      className={`payment-pill ${payMethod === pm ? "selected" : ""}`}
+                      onClick={() => setPayMethod(pm)}
+                    >
                       {pm === "UPI" ? "⚡ UPI" : pm === "WALLET" ? "▣ Wallet" : "₹ Cash"}
                     </button>
                   ))}
                 </div>
-                {walletBalance !== null && (
-                  <div className="wallet-inline">
-                    <span>Wallet {formatINR(paisa(walletBalance))}</span>
-                    <button
-                      type="button"
-                      onClick={() => void topUpWallet(10_000)
-                        .then((result) => setWalletBalance(result.balancePaise))
-                        .catch((err) => setError(err instanceof Error ? err.message : "Top-up failed"))}
-                    >
-                      + ₹100
-                    </button>
-                  </div>
-                )}
               </div>
-              <span className="map-tip">Tip: click the map to pin locations</span>
             </div>
 
-            {loadingQuotes && <div className="loading-fares"><span className="search-spinner" /> Calculating live fares…</div>}
-          </section>
+            {loadingQuotes && (
+              <div className="loading-fares" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
+                <span className="search-spinner" /> Calculating live fair estimates...
+              </div>
+            )}
+          </NeoCard>
         )}
+
+        {/* Phase 2: Vehicle Selection Cards */}
         {phase.k === "quotes" && (
-          <div className="card panel-card">
-            <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 800 }}>Choose Vehicle</h3>
-            {phase.quotes.map((q) => (
-              <button key={q.vehicleClass} className="quote-row" onClick={() => setPhase({ k: "offer", quote: q })}>
-                <div className="quote-class">
-                  <span style={{ fontSize: 20 }}>{vehicleIcon(q.vehicleClass)}</span>
-                  <div>
-                    <div>{vehicleLabel(q.vehicleClass)}</div>
-                    <div style={{ fontSize: 11, color: "var(--ink-soft)", fontWeight: 600 }}>
-                      {q.distanceKm} km · {q.etaMin} min ETA
-                      {q.trafficLevel && (
-                        <span className={`traffic-chip ${q.trafficLevel.toLowerCase()}`}>
-                          {q.trafficLevel === "HEAVY" ? "Heavy traffic" : q.trafficLevel === "MODERATE" ? "Moderate traffic" : "Light traffic"}
-                        </span>
-                      )}
+          <NeoCard elevation="md" style={{ padding: 22 }}>
+            <div className="spread" style={{ marginBottom: 14 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 900, textTransform: "uppercase" }}>Select Vehicle</h3>
+              <NeoButton variant="white" size="sm" onClick={reset}>
+                Change Route
+              </NeoButton>
+            </div>
+
+            <div className="col" style={{ gap: 8 }}>
+              {phase.quotes.map((q) => (
+                <div
+                  key={q.vehicleClass}
+                  className="quote-row"
+                  onClick={() => setPhase({ k: "offer", quote: q })}
+                >
+                  <div className="quote-class">
+                    <span style={{ fontSize: 24 }}>{vehicleIcon(q.vehicleClass)}</span>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 14.5 }}>{vehicleLabel(q.vehicleClass)}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-muted)", fontWeight: 600 }}>
+                        {q.distanceKm} km · ~{q.etaMin} min ETA
+                      </div>
                     </div>
                   </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div className="quote-price">{formatINR(paisa(q.listPrice))}</div>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--primary)" }}>Name your offer →</div>
+                  </div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div className="quote-price">{formatINR(paisa(q.listPrice))}</div>
-                  <div style={{ fontSize: 10.5, color: "var(--teal)", fontWeight: 800 }}>Both parts negotiable</div>
-                </div>
-              </button>
-            ))}
-            <div className="quote-route-summary">
-              <span>{pickupLabel || "Pickup"}</span><b>→</b><span>{dropLabel || "Drop-off"}</span>
-              <button type="button" onClick={saveCurrentRoute}>☆ Save</button>
+              ))}
             </div>
-            <button className="btn-ghost" style={{ marginTop: 8, width: "100%" }} onClick={reset}>
-              ← Change Route
-            </button>
-          </div>
+          </NeoCard>
         )}
 
-        {phase.k === "offer" && (
+        {/* Phase 3: Offer Builder Sheet */}
+        {phase.k === "offer" && pickup && drop && (
           <OfferSheet
             quote={phase.quote}
-            pickup={pickup!}
-            drop={drop!}
+            pickup={pickup}
+            drop={drop}
             payMethod={payMethod}
-            onClose={() => setPhase({ k: "quotes", quotes: lastQuotes.current })}
-            onBooked={(session) => setPhase({ k: "matching", session, counter: null, quote: phase.quote })}
+            onClose={() => setPhase({ k: "quotes", quotes: [phase.quote] })}
+            onBooked={(session) => {
+              setPhase({ k: "matching", session, counter: null, quote: phase.quote });
+            }}
           />
         )}
 
+        {/* Phase 4: Matching Status Card */}
         {phase.k === "matching" && (
-          <div className="card panel-card">
-            <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800 }}>
-              {phase.session.mode === "NEGOTIATED" ? "⚡ Broadcasting Offer…" : "Finding Drivers…"}
-            </h3>
-            <div className="matching-offer-summary">
-              <div>
-                <span>NET OFFER</span>
-                <strong>{formatINR(paisa(Number(phase.session.riderTotalPaise ?? phase.session.currentOfferPaise ?? 0)))}</strong>
-              </div>
-              <div>
-                <span>TO DRIVER</span>
-                <strong>{formatINR(paisa(Number(phase.session.currentOfferPaise ?? 0)))}</strong>
-              </div>
-              <div>
-                <span>PLATFORM</span>
-                <strong>{formatINR(paisa(Number(phase.session.platformFeePaise ?? 0)))}</strong>
-              </div>
+          <NeoCard elevation="md" style={{ padding: 22 }}>
+            <div className="spread" style={{ marginBottom: 12 }}>
+              <span className="eyebrow">RADAR ACTIVE</span>
+              <NeoBadge variant="green">SEARCHING DRIVERS</NeoBadge>
             </div>
-            <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-              {phase.session.mode === "NEGOTIATED"
-                ? "Your split offer is broadcasting. The driver sees their take-home amount."
-                : "Broadcasting at the standard estimate."}
+            <h3 style={{ fontSize: 20, marginBottom: 6 }}>Connecting With Drivers...</h3>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
+              Broadcasting your offer to nearby verified drivers.
             </p>
 
-            <div className="progress-track">
-              <div
-                className="progress-fill"
-                style={{
-                  width: `${Math.max(4, Math.min(100, ((secsLeft ?? 0) / MATCH_TOTAL_S) * 100))}%`,
-                  transition: "width 1s linear",
-                }}
-              />
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)" }}>
-              <span>Round {phase.session.round} of {phase.session.maxRounds}</span>
-              <span>⏱ {secsLeft}s remaining</span>
+            <div className="progress-track" style={{ marginBottom: 16 }}>
+              <div className="progress-fill" style={{ width: "100%", animation: "brut-pulse 1.5s infinite" }} />
             </div>
 
-            {phase.counter && (
-              <CounterModal
-                counter={phase.counter}
-                vehicleClass={phase.quote?.vehicleClass ?? ""}
-                platformFeePaise={phase.session.platformFeePaise ?? phase.quote?.platformFeePaise ?? 0}
-                onClose={() => setPhase((p) => (p.k === "matching" ? { ...p, counter: null } : p))}
-                minimumDriverPaise={phase.session.currentOfferPaise ?? 0}
-                onResolved={(outcome) => void onCounterResolved(outcome)}
-              />
-            )}
-
-            {phase.session.state === "EXPIRED" && pickup && drop && (
-              <button className="btn-primary" style={{ width: "100%", marginTop: 14 }} onClick={() => void loadQuotesForRoute(pickup, drop)}>
-                Search again with fresh fares
-              </button>
-            )}
-            <button
-              className="btn-danger"
-              style={{ width: "100%", marginTop: 16 }}
+            <NeoButton
+              variant="red"
+              fullWidth
               onClick={() => {
-                if (!cancelConfirm) {
-                  setCancelConfirm(true);
-                  return;
+                if (phase.k === "matching") {
+                  void cancelRequest(phase.session.sessionId);
+                  reset();
                 }
-                void cancelRequest(phase.session.sessionId).then(reset);
               }}
             >
-              {cancelConfirm ? "Tap again to confirm cancellation" : "Cancel request"}
-            </button>
-          </div>
+              Cancel Request
+            </NeoButton>
+          </NeoCard>
         )}
 
+        {/* Phase 5: Ongoing Trip Card */}
         {phase.k === "trip" && (
-          <div className="card panel-card">
-            <div className="spread" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>{stateLabel(phase.trip.state)}</h3>
-              <span className="pill">{vehicleLabel(phase.trip.vehicleClass)}</span>
+          <NeoCard elevation="md" style={{ padding: 22 }}>
+            <div className="spread" style={{ marginBottom: 12 }}>
+              <NeoBadge variant="primary">{phase.trip.state}</NeoBadge>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)" }}>{phase.trip.vehicleClass}</span>
             </div>
+            <h3 style={{ fontSize: 20, marginBottom: 8 }}>{stateLabel(phase.trip.state)}</h3>
 
-            <div className="driver-strip">
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 15 }}>{phase.trip.driverName || "Assigned Driver"}</div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  ★ {phase.trip.driverRating ? phase.trip.driverRating.toFixed(1) : "4.9"} · {phase.trip.driverPlate}
+            {phase.trip.otp && (
+              <div className="otp-display">
+                <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
+                  Start OTP for Driver
+                </div>
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
+                  {phase.trip.otp}
                 </div>
               </div>
-              <a
-                className="btn-ghost"
-                style={{ fontSize: 12, padding: "6px 12px" }}
-                href={`https://www.google.com/maps/dir/?api=1&destination=${phase.trip.pickup.lat},${phase.trip.pickup.lng}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                📍 Map
-              </a>
+            )}
+
+            <div className="fare-box">
+              <div className="fare-line">
+                <span>Agreed Fare</span>
+                <strong>{formatINR(paisa(phase.trip.fareBreakdown.agreedPaise))}</strong>
+              </div>
+              <div className="fare-line">
+                <span>Platform Fee</span>
+                <span>{formatINR(paisa(phase.trip.fareBreakdown.platformFeePaise))}</span>
+              </div>
+              <div className="fare-total spread">
+                <span>Total</span>
+                <strong>{formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}</strong>
+              </div>
             </div>
-
-            {phase.trip.state !== "ONGOING" && !!phase.trip.otp && (
-              <>
-                <div className="step-label" style={{ textAlign: "center", color: "var(--teal)" }}>
-                  Show this OTP to your driver to start:
-                </div>
-                <button
-                  type="button"
-                  className="otp-display"
-                  title="Copy start OTP"
-                  onClick={() => void navigator.clipboard.writeText(phase.trip.otp ?? "")}
-                >
-                  {phase.trip.otp} <small>Tap to copy</small>
-                </button>
-              </>
-            )}
-
-            <FareLines trip={phase.trip} />
-            {["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(phase.trip.state) && (
-              <button
-                className="btn-danger"
-                style={{ width: "100%", marginTop: 12 }}
-                onClick={() => void cancelMatchedTrip(phase.trip.id)
-                  .then(() => reset())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Cancellation failed"))}
-              >
-                Cancel matched ride
-              </button>
-            )}
-          </div>
+          </NeoCard>
         )}
 
+        {/* Phase 6: Completed Ride Receipt */}
         {phase.k === "done" && (
-          <div className="card panel-card">
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800 }}>Ride Completed!</h3>
-            <FareLines trip={phase.trip} />
+          <NeoCard elevation="lg" style={{ padding: 24 }}>
+            <div className="spread" style={{ marginBottom: 12 }}>
+              <span className="eyebrow">RIDE COMPLETED</span>
+              <NeoBadge variant="green">SUCCESSFUL</NeoBadge>
+            </div>
+            <h3 style={{ fontSize: 22, marginBottom: 8 }}>You've Arrived!</h3>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
+              Total paid: {formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}
+            </p>
 
-            {!rated ? (
-              <>
-                <div className="step-label" style={{ marginTop: 14 }}>
-                  Add a Driver Tip?
-                </div>
-                <div className="row">
-                  {[0, 1000, 2000, 5000].map((t) => (
-                    <button key={t} className={`chip ${tipPaise === t ? "selected" : ""}`} onClick={() => setTipPaise(t)}>
-                      {t === 0 ? "No tip" : `+${formatINR(paisa(t))}`}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="step-label" style={{ marginTop: 14 }}>
-                  Rate your experience:
-                </div>
-                <div className="stars">
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <button
-                      key={s}
-                      className="star"
-                      aria-label={`${s} stars`}
-                      onClick={() => void submitFeedback(s, phase.trip)}
-                    >
-                      ★
-                    </button>
-                  ))}
-                </div>
-
-                <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                  {["Punctual Driver", "Clean Vehicle", "Polite & Safe", "Smooth Ride"].map((tag) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      className={`chip ${selectedTag === tag ? "selected" : ""}`}
-                      onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="ok-text" style={{ textAlign: "center", margin: "14px 0", fontSize: 14 }}>
-                ✓ Thank you for rating your ride!
-              </div>
-            )}
-
-            <button className="btn-primary" style={{ width: "100%", marginTop: 14 }} onClick={reset}>
-              Book Another Ride
-            </button>
-          </div>
+            <NeoButton variant="primary" fullWidth onClick={reset}>
+              Book Another Ride 🚀
+            </NeoButton>
+          </NeoCard>
         )}
       </div>
-    </div>
-  );
-}
 
-function FareLines({ trip }: { trip: TripView }): React.ReactElement {
-  const f = trip.fareBreakdown;
-  if (!f) return <></>;
-  return (
-    <div className="fare-box">
-      <div className="fare-line">
-        <span>Agreed Fare (100% to Driver)</span>
-        <span style={{ fontWeight: 700 }}>{formatINR(paisa(f.agreedPaise))}</span>
-      </div>
-      <div className="fare-line muted">
-        <span>
-          Platform Fee{" "}
-          <i className="info-dot" tabIndex={0}>
-            ℹ
-            <span className="info-tip">
-              You can negotiate to zero — this fee keeps Chalo-X running: servers, support, insurance.
-            </span>
-          </i>
-        </span>
-        <span>{formatINR(paisa(f.platformFeePaise))}</span>
-      </div>
-      {(f.tipPaise ?? 0) > 0 && (
-        <div className="fare-line">
-          <span>Driver Tip</span>
-          <span style={{ color: "var(--good)" }}>+{formatINR(paisa(f.tipPaise!))}</span>
-        </div>
-      )}
-      <div className="fare-line fare-total">
-        <span>Total Charged</span>
-        <span>{formatINR(paisa(f.riderTotalPaise + (f.tipPaise ?? 0)))}</span>
-      </div>
-      {f.discountVsListPct > 0 && (
-        <div className="ok-text" style={{ fontSize: 12 }}>
-          ✓ You saved {f.discountVsListPct}% vs standard list fare!
-        </div>
+      {showCounterModal && activeDriverCounter && (
+        <CounterModal
+          counter={activeDriverCounter}
+          countdownSeconds={countdownSeconds}
+          onAccept={() => setShowCounterModal(false)}
+          onFinalOffer={() => setShowCounterModal(false)}
+          onDecline={() => setShowCounterModal(false)}
+        />
       )}
     </div>
   );

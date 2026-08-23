@@ -105,13 +105,74 @@ These came up during review and are correctly absent:
 
 ## 7. Backend micro-gaps surfaced by this review (small, worth batching)
 
-These are backend one-liners discovered while auditing UI expectations — cheap to fix in a single commit batch:
+These are backend fixes discovered while auditing UI expectations — cheap to fix in a single commit batch:
 1. `tripView()` missing `paymentMethod` / `startedAt` / `endedAt` (U5).
 2. No `cancel-rider` trip route (U2).
 3. Rate endpoint never updates `rating_rolling` (U4).
 4. `/v1/driver/me` omits rating → forces the hardcoded `★ 4.9`.
 5. WS `trip.location` message type defined in protocol, never emitted (R3).
 6. No wallet-balance guard on `paymentMethod: WALLET` booking (R1).
+7. **Expiry sweeper pushes a fabricated session** — `mode:"NEGOTIATED", round:3, listPrice:0 as never` (sweeper block in `server.ts`) regardless of actual mode; a LIST-price rider's expiry banner literally says "list price ₹0".
+8. `createNegotiation` silently cancels the rider's prior live negotiation (`negotiation.ts:41-45`) **without `cancelBroadcast`** — stale driver cards again, same class as the bug fixed in `3806845`.
+9. **LIST-mode `ride_requests` are never swept** — the sweeper only expires requests linked to negotiations; orphaned MATCHING rows live forever.
+10. Quote tokens are replayable — stateless HMAC, no single-use nonce → one quote can spam unlimited dispatch broadcasts.
+11. Zero rate limiting on `/v1/auth/*`, `/v1/quotes`, `/v1/requests` — becomes an SMS-pumping cost hole the moment MSG91 lands.
+12. `pos.update` trusts client coordinates blindly (`dispatch.ts`) — drivers can teleport to high-fare pickups.
+13. No `/healthz` endpoint and no SIGTERM graceful-shutdown wiring — deploys drop Neon connections abruptly; uptime monitors have nothing to ping.
+14. `ioredis` is declared in `package.json` but imported nowhere — dead dependency.
+15. Dev endpoints gate on `NODE_ENV !== "production"` — an *unset* NODE_ENV exposes `/v1/dev/*` publicly; invert to an explicit allow-list. CORS likewise reflects any origin (`origin: true`).
 
 ---
-*Evidence policy: every claim cites file + line in the current tree; behavioral claims were verified against the running stack (Neon-backed full-flow suite, 66/66 passing at time of writing).*
+
+## 8. Second-pass deep-dive (security, lifecycle, honesty, ops)
+
+### 8a. Trust & security posture
+
+| # | Finding | Impact | Suggested cut |
+|---|---|---|---|
+| S1 | **WS auth uses the raw JWT in the URL query** (`ws/rider?token=…` on both apps) | Tokens leak into proxy/access logs and browser history; 12h validity (`auth.ts:41`) makes a leaked token long-lived | One-shot WS tickets: `POST /v1/ws/ticket` mints a 60s single-use opaque token for the query string |
+| S2 | Tokens live in `localStorage` — readable by any injected script; neither Vite app sets a CSP | Standard XSS → full account theft incl. wallet | Acceptable v1 risk *if documented*; add baseline CSP before real users |
+| S3 | **Client GPS is trusted for dispatch** — `pos.update` accepts arbitrary coordinates; a driver can teleport to airport pickups while sitting elsewhere | Corrupts marketplace fairness at its core | Sanity-check jump speed between consecutive updates; flag >200 km/h moves |
+| S4 | Quote-token replay (§7.10) lets one client fan out unlimited broadcasts | Dispatch flood DoS against drivers | Mark token consumed (jti) on first successful `/v1/requests` |
+| S5 | Password mode auto-registers any fresh phone with "any password ≥ 4 chars" (`Login.tsx:154-156`) — whoever types a claimed phone number first owns it | Account-squatting on a phone-identity system | Require OTP verification to bind the phone before password login activates for it |
+| S6 | Demo credentials ship in prod UI: prefilled `+919900000001` (`Login.tsx:11`) and unconditional `dev: 123456` pill | Test creds visible to real users | Gate behind `import.meta.env.DEV` / `NODE_ENV`
+
+### 8b. Lifecycle gaps nobody handles yet
+
+1. **Driver disconnects mid-pickup → orphaned trip.** Presence is in-memory; when the driver's tab closes, the rider's marker freezes silently and the trip sits in ARRIVED forever. No disconnect event, no rider notice, no reassignment. Minimum cut: on driver WS close, sweep their non-terminal trips and push a `driver.offline`/cancellation message to the rider.
+2. **Server restart amnesia.** A restart wipes `liveDrivers`, `claims`, and all queued offers; DB trips survive but riders stare at frozen maps. Persist presence/claims — or push a `session.reset` message that triggers a client refetch.
+3. **Same driver, two tabs:** the second connection silently replaces the first in `driverConns`/`liveDrivers`; tab #1 keeps rendering stale "online" state and can double-accept. Reject duplicate connections or sync via `BroadcastChannel`.
+4. **Riders can stack concurrent LIST requests** — only negotiated requests get auto-cancelled by `createNegotiation`. Three taps = three broadcasts = three drivers' phones ringing. Guard: one unresolved request per rider → `REQUEST_ALREADY_LIVE`.
+5. **Expired matching is a dead end:** when the countdown hits zero the panel just sits there; the only exits are Cancel or manual reset. Add "Search again" (re-quote same route) as the primary action.
+
+### 8c. Data-honesty bugs in what the screens display
+
+1. **Cancelled trips render as earnings.** `EarningsDrawer.tsx:80-92` lists every trip with `+{formatINR(agreedPaise)}` — including `CANCELLED_*` ones — and rider `History.tsx` shows full fare rows for cancelled rides with no "not charged" distinction. Drivers will believe they earned money they didn't.
+2. **The sweeper's fake payload lies twice** (§7.7): wrong mode AND `round:3, listPrice:₹0` — the rider UI will render "Round 3 of 3 · List ₹0" on an expired LIST booking.
+3. `completedTrips` counts only COMPLETED trips, but the receipts list mixes everything — the driver's "rides ↔ receipts" math visibly won't add up.
+4. Rate/km stat on zero-offers (`OfferCard.tsx:143`) shows `₹0/km` in the same style as real stats — label zero-offers as "Rider's offer" instead of shaming the number that is the product's whole point.
+5. `completedTrips > 0` gating in `/v1/driver/me` aside, there is no way to see *which* payment methods money came from — CASH receivable vs wallet is invisible until payouts exist (D1).
+
+### 8d. Ops & deployment notes
+
+1. File-based logging into `services/core/logs/` with no rotation — disk-fill risk on long-running nodes; log to stdout and let the platform aggregate.
+2. No `/healthz` — load balancers, uptime monitors, and Neon wake-up probes all want one.
+3. No graceful shutdown: wire `SIGTERM/SIGINT` → the existing `handle.close()` so deploys drain sockets and close the pool cleanly.
+4. `JWT_SECRET` silently falls back to a known constant (`pricing.ts:14`, likely `auth.ts` too) — if env is missing in production, quote tokens become forgeable and sessions spoofable. Refuse to boot when `NODE_ENV=production` with default secrets.
+5. Single hardcoded Neon endpoint in `.env` — document the failover/branch story before pilots depend on the DB.
+
+### 8e. Rapid-fire polish list
+
+- No copy-to-clipboard / share affordance on the OTP display (riders read digits aloud over street noise).
+- Cancel Request fires on a single tap — add a short confirm state; accidental taps kill a live broadcast.
+- CounterModal lets you type a final offer below your own last offer, then surfaces the raw `OFFER_MUST_NOT_DECREASE` error — clamp the input instead.
+- Expired counter modal claims *"Your original offer is still broadcasting"* (`CounterModal.tsx:131`) — often false: if the negotiation expired, the sweeper killed the entire request. Copy should reflect actual state.
+- **Driver console has no logout button at all** — the only escapes are the 12h JWT expiring or clearing localStorage manually.
+- Rider "← Back to home" (`Login.tsx:195`) navigates to `/`, which requires auth and bounces straight back to `/login` — a dead button.
+- Sub-rupee display is inconsistent between chips and totals (`formatINR` rounding) — pick one rule for lowball offers like ₹37.50.
+- Trip ID shown to drivers (`TripPanel.tsx:71`) is meaningless to them — swap for rider name + payment method, both already in the payload.
+
+---
+*Evidence policy: every claim cites file + line in the current tree; behavioral claims were verified against the running stack (Neon-backed full-flow suite, 66/66 passing at time of writing). Second-pass items in §7.7–15 and §8 were verified by direct source inspection on the same tree.*
+
+

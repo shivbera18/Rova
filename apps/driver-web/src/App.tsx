@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { formatINR, paisa, type LatLon } from "@chalo/protocol";
-import { clearToken, connectDriverSocket, getToken, api, type DriverSocket, type Offer } from "./api";
-import { Login, DriverLanding } from "./Login";
+import { clearToken, connectDriverSocket, getToken, api, type DriverSocket } from "./api";
+import { Login } from "./Login";
+import { DriverLanding } from "./Landing";
 import { MapView, type MapStops } from "./MapView";
 import { OfferCard, unlockOfferAudio, type OfferEntry } from "./OfferCard";
 import { TripPanel } from "./TripPanel";
@@ -20,15 +21,13 @@ const HOTSPOTS: Array<{ name: string; pos: LatLon }> = [
   { name: "📍 Airport", pos: { lat: 13.1986, lng: 77.7066 } },
 ];
 
-
-function Console() {
+function DriverConsole({ onLogout }: { onLogout: () => void }) {
   const [online, setOnline] = useState(false);
   const [connected, setConnected] = useState(false);
   const [offers, setOffers] = useState<OfferEntry[]>([]);
   const [tripId, setTripId] = useState<string | null>(() => localStorage.getItem(TRIP_KEY));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [myPos, setMyPos] = useState<LatLon>({ lat: 12.9352, lng: 77.6245 });
-  const [activeVehicle, setActiveVehicle] = useState("BIKE");
   const [me, setMe] = useState<DriverMe | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
 
@@ -42,111 +41,95 @@ function Console() {
   posRef.current = myPos;
 
   const loadMe = useCallback(() => {
-    api
+    void api
       .driverMe()
-      .then((data) => {
-        setMe(data);
-        setSessionReady(true);
-        if (data.profile?.vehicle_class) setActiveVehicle(data.profile.vehicle_class);
-        if (typeof data.profile?.online === "boolean") setOnline(data.profile.online);
+      .then((res) => {
+        setMe(res);
       })
       .catch(() => {
-        // api.ts purges stale tokens and dispatches "storage" on 401/403.
-        // App owns the redirect; Console renders nothing while it happens.
-        setSessionReady(false);
-      });
+        setMe(null);
+      })
+      .finally(() => setSessionReady(true));
   }, []);
 
   useEffect(loadMe, [loadMe]);
 
-  const updateDriverStatus = useCallback(async (isOnline: boolean, pos?: LatLon) => {
-    try {
-      await api.updateStatus({
-        online: isOnline,
-        lat: pos?.lat ?? posRef.current.lat,
-        lng: pos?.lng ?? posRef.current.lng,
-      });
-    } catch {}
-  }, []);
   const [wsSession, setWsSession] = useState(0);
+
   useEffect(() => {
     if (!sessionReady) return;
-    if (online) {
-      setWsSession((s) => s + 1);
-      void updateDriverStatus(true, myPos);
-    } else {
-      void updateDriverStatus(false, myPos);
+    if (!online) {
+      sockRef.current?.close();
+      sockRef.current = null;
+      setConnected(false);
+      return;
     }
+    setWsSession((prev) => prev + 1);
   }, [online, sessionReady]);
 
   useEffect(() => {
     const token = getToken();
-    if (!token || wsSession === 0 || !sessionReady) return;
+    if (!sessionReady || !online || !token) return;
+    let destroyed = false;
     const sock = connectDriverSocket(
       token,
       (msg) => {
+        if (destroyed) return;
         if (msg.t === "dispatch.offer") {
-          const o: Offer = msg.offer;
           if (!onlineRef.current) return;
-          setOffers((prev) =>
-            prev.some((e) => e.offer.requestId === o.requestId && e.offer.negotiationId === o.negotiationId)
-              ? prev
-              : [...prev, { offer: o, ttlMs: Math.max(15000, new Date(o.expiresAt).getTime() - Date.now()) }],
-          );
+          unlockOfferAudio();
+          const offer = msg.offer;
+          const ttlMs = offer.expiresAt ? Math.max(0, new Date(offer.expiresAt).getTime() - Date.now()) : 20000;
+          setOffers((prev) => {
+            if (prev.some((o) => o.offer.requestId === offer.requestId)) return prev;
+            return [{ offer, ttlMs }, ...prev];
+          });
         } else if (msg.t === "dispatch.cancel") {
-          setOffers((prev) => prev.filter((e) => e.offer.requestId !== msg.requestId));
-        } else if (msg.t === "trip.state" && msg.state === "DRIVER_ASSIGNED") {
+          setOffers((prev) => prev.filter((o) => o.offer.requestId !== msg.requestId));
+        } else if (msg.t === "trip.state") {
           if (msg.tripId) {
-            localStorage.setItem(TRIP_KEY, msg.tripId);
-            setTripId(msg.tripId);
             setOffers([]);
-          } else {
-            api
-              .trips()
-              .then((r) => {
-                const t = r.trips.find((x) => !x.state.startsWith("COMPLETED") && !x.state.startsWith("CANCELLED"));
-                if (t) {
-                  localStorage.setItem(TRIP_KEY, t.id);
-                  setTripId(t.id);
-                  setOffers([]);
-                }
-              })
-              .catch(() => undefined);
+            setTripId(msg.tripId);
+            localStorage.setItem(TRIP_KEY, msg.tripId);
           }
         }
       },
-      setConnected,
+      (isConnected) => {
+        if (destroyed) return;
+        setConnected(isConnected);
+        if (isConnected) {
+          sock.send({ t: "pos.update", lat: posRef.current.lat, lng: posRef.current.lng });
+        }
+      },
     );
     sockRef.current = sock;
     return () => {
+      destroyed = true;
       sock.close();
-      sockRef.current = null;
-      setConnected(false);
     };
-  }, [wsSession, sessionReady]);
+  }, [wsSession, sessionReady, online]);
 
   useEffect(() => {
-    const send = (): void => {
-      const pos = posRef.current;
-      if (onlineRef.current && sockRef.current?.readyState === WebSocket.OPEN) {
-        sockRef.current.send({ t: "pos.update", lat: pos.lat, lng: pos.lng });
-      }
-    };
-    const first = setTimeout(send, 1000);
-    const iv = setInterval(send, 4000);
-    return () => {
-      clearTimeout(first);
-      clearInterval(iv);
-    };
+    if (!navigator.geolocation) return;
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => {
+        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMyPos(next);
+        if (onlineRef.current) {
+          sockRef.current?.send({ t: "pos.update", lat: next.lat, lng: next.lng });
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
+    );
+    return () => navigator.geolocation.clearWatch(watch);
   }, []);
 
   const handleLocationPick = (pos: LatLon): void => {
     setMyPos(pos);
-    posRef.current = pos;
-    if (sockRef.current?.readyState === WebSocket.OPEN) {
-      sockRef.current.send({ t: "pos.update", lat: pos.lat, lng: pos.lng });
+    if (online) {
+      sockRef.current?.send({ t: "pos.update", lat: pos.lat, lng: pos.lng });
     }
-    void updateDriverStatus(online, pos);
   };
 
   const removeOffer = useCallback((requestId: string) => {
@@ -155,15 +138,14 @@ function Console() {
 
   function onAccepted(tripIdToSet: string): void {
     setOffers([]);
-    localStorage.setItem(TRIP_KEY, tripIdToSet);
     setTripId(tripIdToSet);
+    localStorage.setItem(TRIP_KEY, tripIdToSet);
   }
 
   function onTripClosed(): void {
-    localStorage.removeItem(TRIP_KEY);
     setTripId(null);
-    setDrawerOpen(true);
-    void api.driverMe().then(setMe).catch(() => undefined);
+    localStorage.removeItem(TRIP_KEY);
+    loadMe();
   }
 
   if (!sessionReady) return null;
@@ -178,104 +160,115 @@ function Console() {
   if (me?.profile && me.profile.kyc_status !== "APPROVED") {
     return <OnboardingCard vehicle={me.profile.vehicle_class} status={me.profile.kyc_status} onUpdated={loadMe} />;
   }
+
   return (
     <div className="app-shell" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <header className="topbar">
-        <div className="brand">
-          CHALO-X <span style={{ color: "var(--blue)" }}>DRIVER</span>
-          <span className="brut-badge brut-badge-green" style={{ marginLeft: 8 }}>CONSOLE</span>
-        </div>
-        <span className={"conn-dot" + (connected ? " ok" : "")} title={connected ? "Connected" : "Disconnected"} />
+        <Link to="/" className="brand-badge">
+          CHALO<span className="brand-accent">-X</span> DRIVER
+        </Link>
+        <span className="status-pill" style={{ marginLeft: 8 }}>
+          <span className={`status-dot ${online ? (connected ? "online" : "busy") : "offline"}`} />
+          {online ? (connected ? "RADAR LIVE" : "CONNECTING...") : "OFFLINE"}
+        </span>
 
-        <div className="vehicle-identity" title="Vehicle is fixed to this driver account">
-          <span>{activeVehicle === "BIKE" ? "🏍️" : activeVehicle === "AUTO" ? "🛺" : "🚗"}</span>
-          <div>
-            <small>REGISTERED VEHICLE</small>
-            <strong>{activeVehicle.replaceAll("_", " ")}</strong>
-          </div>
-          <span className="vehicle-lock">🔒</span>
-        </div>
-        <div style={{ flex: 1 }} />
-
-        <div className={`toggle-wrap${online ? " online" : ""}`} onClick={() => { void unlockOfferAudio(); setOnline((v) => !v); }}>
-          <span className="toggle-label">{online ? "ONLINE" : "OFFLINE"}</span>
+        <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
           <button
-            aria-label="toggle online"
-            className={`switch${online ? " on" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              void unlockOfferAudio();
-              setOnline((v) => !v);
-            }}
-          />
-        </div>
-
-        {pushSupported() && pushState !== "granted" && (
-          <button
-            className="brut-btn brut-btn-white"
-            style={{ padding: "8px 12px", fontSize: 11 }}
-            onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
+            className={`brut-btn brut-btn-sm ${online ? "brut-btn-red" : "brut-btn-green"}`}
+            onClick={() => setOnline((prev) => !prev)}
           >
-            🔔 Enable alerts
+            {online ? "⏹ Go Offline" : "▶ Go Online"}
           </button>
-        )}
-
-        <button
-          className="brut-btn brut-btn-white"
-          style={{ padding: "8px 12px", fontSize: 11 }}
-          onClick={() => {
-            clearToken();
-            localStorage.removeItem(TRIP_KEY);
-            window.dispatchEvent(new Event("storage"));
-          }}
-        >
-          Log out
-        </button>
-        <button className="brut-btn brut-btn-white" style={{ padding: "8px 14px", fontSize: 12 }} onClick={() => setDrawerOpen(true)}>
-          {me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}
-        </button>
+          <button className="brut-btn brut-btn-white brut-btn-sm" onClick={() => setDrawerOpen(true)}>
+            {me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}
+          </button>
+          <button className="brut-btn brut-btn-white brut-btn-sm" onClick={onLogout}>
+            🚪 Logout
+          </button>
+          {pushSupported() && pushState !== "granted" && (
+            <button
+              className="brut-btn brut-btn-white brut-btn-sm"
+              onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
+            >
+              🔔 Alerts
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="map-wrap" style={{ flex: 1, position: "relative" }}>
-        <MapView me={myPos} stops={stops} onLocationPick={handleLocationPick} />
+        <MapView
+          me={myPos}
+          stops={stops}
+          onLocationPick={handleLocationPick}
+        />
 
-        {!tripId && (
-          <div className="location-bar">
-            <span style={{ fontSize: 11, fontWeight: 800 }}>POSITION:</span>
+        {/* Hotspots Panel */}
+        <div
+          className="brut-card"
+          style={{
+            position: "absolute",
+            top: 14,
+            left: 14,
+            padding: "8px 12px",
+            zIndex: 30,
+            background: "rgba(255, 255, 255, 0.95)",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--ink-muted)", marginBottom: 4 }}>
+            Fast Hotspots
+          </div>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
             {HOTSPOTS.map((h) => (
               <button
                 key={h.name}
                 type="button"
-                className={`chip-place ${myPos.lat === h.pos.lat && myPos.lng === h.pos.lng ? "selected" : ""}`}
+                className="brut-btn brut-btn-white brut-btn-sm"
+                style={{ padding: "4px 8px", fontSize: 11.5 }}
                 onClick={() => handleLocationPick(h.pos)}
               >
                 {h.name}
               </button>
             ))}
           </div>
-        )}
+        </div>
 
-        {tripId !== null && <TripPanel tripId={tripId} onFinished={onTripClosed} />}
+        {/* Active Trip or Incoming Offers */}
+        {tripId ? (
+          <TripPanel tripId={tripId} onFinished={onTripClosed} />
+        ) : top ? (
+          <div className="offer-card">
+            <OfferCard
+              entry={top}
+              onAccept={onAccepted}
+              onSkip={() => removeOffer(top.offer.requestId)}
+            />
+          </div>
+        ) : null}
 
-        {!tripId && top && (
-          <OfferCard
-            key={`${top.offer.requestId}:${top.offer.negotiationId ?? ""}`}
-            entry={top}
-            onAccept={onAccepted}
-            onSkip={() => removeOffer(top.offer.requestId)}
-          />
-        )}
-
+        {/* Status radar idle banner */}
         {!tripId && offers.length === 0 && (
-          <div className="map-status-pill brut-card" style={{ padding: "10px 18px", background: online ? "var(--green)" : "#fff" }}>
-            {online ? (
-              <>
-                <span className="radar-ping" />
-                <span><strong>LIVE</strong> · Waiting for {activeVehicle.replaceAll("_", " ")} requests near your position…</span>
-              </>
-            ) : (
-              <span>Flip the switch to go <strong>ONLINE</strong> and receive requests</span>
-            )}
+          <div
+            className="brut-card"
+            style={{
+              position: "absolute",
+              bottom: 20,
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "10px 20px",
+              background: online ? "var(--primary-soft)" : "#ffffff",
+              zIndex: 30,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              boxShadow: "var(--shadow-md)",
+            }}
+          >
+            <span className={`status-dot ${online ? "online" : "offline"}`} />
+            <span style={{ fontWeight: 700, fontSize: 13 }}>
+              {online ? "Radar scanning for nearby rider offers..." : "You are offline. Tap 'Go Online' to receive rides."}
+            </span>
           </div>
         )}
       </div>
@@ -287,9 +280,7 @@ function Console() {
 
 export default function App() {
   const [token, setTokenState] = useState<string | null>(getToken);
-  const [showLanding, setShowLanding] = useState(
-    () => !localStorage.getItem("chalox.driver.seenLanding"),
-  );
+  const navigate = useNavigate();
 
   useEffect(() => {
     const sync = (): void => setTokenState(getToken());
@@ -297,27 +288,62 @@ export default function App() {
     return () => window.removeEventListener("storage", sync);
   }, []);
 
-  if (!token) {
-    if (showLanding) {
-      return (
-        <DriverLanding
-          onGetStarted={() => {
-            localStorage.setItem("chalox.driver.seenLanding", "1");
-            setShowLanding(false);
-          }}
-        />
-      );
-    }
-    return (
-      <Routes>
-        <Route path="/login" element={<Login onAuth={setTokenState} />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    );
-  }
+  const handleLogout = (): void => {
+    clearToken();
+    localStorage.removeItem(TRIP_KEY);
+    setTokenState(null);
+    navigate("/");
+  };
+
   return (
     <Routes>
-      <Route path="/" element={<Console />} />
+      {/* Route 1: Public Landing Page */}
+      <Route
+        path="/"
+        element={
+          <DriverLanding
+            onGetStarted={() => {
+              if (token) {
+                navigate("/drive");
+              } else {
+                navigate("/login");
+              }
+            }}
+            onSwitchPortal={() => window.open("http://localhost:5173/", "_blank")}
+          />
+        }
+      />
+
+      {/* Route 2: Driver Authentication */}
+      <Route
+        path="/login"
+        element={
+          token ? (
+            <Navigate to="/drive" replace />
+          ) : (
+            <Login
+              onAuth={(tok) => {
+                setTokenState(tok);
+                navigate("/drive");
+              }}
+            />
+          )
+        }
+      />
+
+      {/* Route 3: Driver Radar / Dashboard (/drive) */}
+      <Route
+        path="/drive/*"
+        element={
+          token ? (
+            <DriverConsole onLogout={handleLogout} />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+
+      {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

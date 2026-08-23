@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { api, setToken } from "./api";
-import { Landing } from "./Landing";
 
 type Mode = "OTP" | "PASSWORD";
 type Step = "PHONE" | "OTP";
 
 export function Login({ onAuth }: { onAuth: (token: string) => void }) {
-  const [mode, setMode] = useState<Mode>("OTP");
+  const [mode] = useState<Mode>("OTP");
   const [step, setStep] = useState<Step>("PHONE");
   const [phone, setPhone] = useState(import.meta.env.DEV ? "+919900000101" : "");
   const [otp, setOtp] = useState("");
   const [vehicleClass, setVehicleClass] = useState("BIKE");
-  const [password, setPassword] = useState("");
+  const [password] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -28,136 +27,136 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
         localStorage.setItem("chalox.driver.seenLanding", "1");
         onAuth(sess.token);
       } else if (step === "PHONE") {
-        await api.sendOtp(phone);
+        const res = await api.sendOtp(phone);
+        if (res.devHint) setOtp(res.devHint);
         setStep("OTP");
       } else {
-        const sess = await api.verifyOtp(phone, otp, vehicleClass, newPassword.length >= 4 ? newPassword : undefined);
+        const sess = await api.verifyOtp(phone, otp, vehicleClass, newPassword || undefined);
         if (sess.role !== "DRIVER") throw new Error("This account is not a driver");
         setToken(sess.token);
         localStorage.setItem("chalox.driver.seenLanding", "1");
         onAuth(sess.token);
       }
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "Something went wrong");
+      setErr(e2 instanceof Error ? e2.message : "Authentication failed");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative" }}>
-      {/* decorative brutal shapes */}
-      <div aria-hidden style={{ position: "absolute", top: -50, left: -60, width: 220, height: 220, background: "var(--teal)", border: "3px solid var(--ink)", borderRadius: "50%", boxShadow: "8px 8px 0 var(--ink)" }} />
-      <div aria-hidden style={{ position: "absolute", bottom: -60, right: -40, width: 180, height: 180, background: "var(--yellow)", border: "3px solid var(--ink)", borderRadius: "50%", boxShadow: "6px 6px 0 var(--ink)" }} />
-
-      <div className="brut-card" style={{ width: "100%", maxWidth: 420, zIndex: 2 }}>
-        <div className="spread" style={{ marginBottom: 6 }}>
-          <h1 style={{ fontSize: 30 }}>CHALO<span style={{ color: "var(--teal)" }}>-X</span></h1>
-          <span className="brut-badge brut-badge-blue">🛵 DRIVER</span>
-        </div>
-        <div className="muted" style={{ fontWeight: 700, marginBottom: 18 }}>
-          Drive your price. Every rupee you agree on is yours.
+    <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative", background: "var(--paper)" }}>
+      <div className="brut-card" style={{ width: "100%", maxWidth: 420, padding: 32, zIndex: 2, background: "#ffffff" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <span style={{ fontSize: 28 }}>🛵</span>
+          <div>
+            <h1 style={{ fontSize: 24, textTransform: "uppercase" }}>Driver Partner</h1>
+            <span className="brut-badge brut-badge-green">100% FARE TAKE-HOME</span>
+          </div>
         </div>
 
-        <div className="brut-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={mode === "OTP"} className={`brut-tab ${mode === "OTP" ? "active" : ""}`}
-            onClick={() => { setMode("OTP"); setErr(null); }}>
-            📱 OTP Login
-          </button>
-          <button type="button" role="tab" aria-selected={mode === "PASSWORD"} className={`brut-tab ${mode === "PASSWORD" ? "active" : ""}`}
-            onClick={() => { setMode("PASSWORD"); setErr(null); }}>
-            🔒 Password
-          </button>
-        </div>
+        <p style={{ color: "var(--ink-soft)", fontWeight: 500, fontSize: 13.5, marginBottom: 20 }}>
+          {mode === "PASSWORD"
+            ? "Sign in with your phone and account password"
+            : step === "PHONE"
+            ? "Enter your phone number to receive an instant verification code"
+            : `Enter 6-digit OTP sent to ${phone}`}
+        </p>
+
+        {err && (
+          <div className="brut-badge brut-badge-red" style={{ width: "100%", padding: "8px 12px", marginBottom: 16, textTransform: "none", fontSize: 13 }}>
+            ⚠️ {err}
+          </div>
+        )}
 
         <form onSubmit={submit} noValidate>
-          <label className="step-label" htmlFor="dphone">Phone number</label>
-          <input id="dphone" className="brut-input" value={phone} onChange={(e) => setPhone(e.target.value)}
-            placeholder="+91 phone number" inputMode="tel" autoComplete="tel"
-            disabled={busy || (mode === "OTP" && step === "OTP")} />
-
-          {mode === "OTP" && step === "OTP" && (
+          {step === "PHONE" && (
             <>
-              <label className="step-label" htmlFor="dotp">
-                Enter OTP {import.meta.env.DEV && <span className="pill">dev: 123456</span>}
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+                Vehicle Type
               </label>
-              <input id="dotp" className="brut-input" value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-                placeholder="••••••" inputMode="numeric" autoFocus disabled={busy} />
-              <label className="step-label" htmlFor="driver-new-password">Create password (optional)</label>
-              <input
-                id="driver-new-password"
+              <select
                 className="brut-input"
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="At least 4 characters"
-                autoComplete="new-password"
+                style={{ marginBottom: 16, cursor: "pointer" }}
+                value={vehicleClass}
+                onChange={(e) => setVehicleClass(e.target.value)}
+              >
+                <option value="BIKE">🏍️ Bike Taxi</option>
+                <option value="AUTO">🛺 Auto Rickshaw</option>
+                <option value="CAB_MINI">🚗 Mini Cab</option>
+                <option value="CAB_PRIME">🚘 Prime Sedan</option>
+              </select>
+
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+                Phone Number
+              </label>
+              <input
+                className="brut-input"
+                type="tel"
+                placeholder="+91..."
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                style={{ marginBottom: 16 }}
+                autoFocus
               />
             </>
           )}
 
-          <label className="step-label" htmlFor="vehicle">Register one vehicle</label>
-          <select
-            id="vehicle"
-            className="brut-select"
-            value={vehicleClass}
-            onChange={(e) => setVehicleClass(e.target.value)}
-            disabled={busy}
-          >
-            <option value="BIKE">🏍️ Bike</option>
-            <option value="AUTO">🛺 Auto</option>
-            <option value="CAB_MINI">🚗 Cab Mini</option>
-            <option value="CAB_PRIME">🚘 Cab Prime</option>
-            <option value="CAB_XL">🚙 Cab XL</option>
-          </select>
-          <p className="vehicle-lock-note">🔒 One vehicle per account. Changes require document review.</p>
-          {mode === "PASSWORD" && (
+          {step === "OTP" && (
             <>
-              <label className="step-label" htmlFor="dpass">Password</label>
-              <input id="dpass" className="brut-input" type="password" value={password}
-                onChange={(e) => setPassword(e.target.value)} placeholder="Your password"
-                autoComplete="current-password" autoFocus />
-              <div className="ok-text" style={{ marginTop: 10 }}>
-                First time? Any password ≥ 4 chars registers this phone automatically.
-              </div>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+                Verification OTP
+              </label>
+              <input
+                className="brut-input"
+                type="text"
+                placeholder="123456"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                style={{ marginBottom: 16 }}
+                autoFocus
+              />
+
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+                Set Password (Optional)
+              </label>
+              <input
+                className="brut-input"
+                type="password"
+                placeholder="Optional login password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                style={{ marginBottom: 16 }}
+              />
             </>
           )}
 
-          {err && <div className="error-text">{err}</div>}
-
-          <button className="brut-btn brut-btn-primary brut-btn-full" type="submit"
-            style={{ marginTop: 16, fontSize: 16 }}
-            disabled={busy || phone.length < 6 || (mode === "PASSWORD" ? password.length < 4 : step === "OTP" && otp.length < 6)}>
-            {busy
-              ? "Please wait…"
-              : mode === "PASSWORD"
-                ? "🔒 Sign in with password"
-                : step === "PHONE"
-                  ? "📲 Send OTP"
-                  : "✅ Verify & drive"}
+          <button className="brut-btn brut-btn-primary brut-btn-full" type="submit" disabled={busy}>
+            {busy ? "Authenticating..." : step === "PHONE" ? "Get Login Code →" : "Verify & Launch Radar 🚀"}
           </button>
 
-          {mode === "OTP" && step === "OTP" && (
-            <button type="button" className="brut-btn brut-btn-white brut-btn-full"
+          {step === "OTP" && (
+            <button
+              type="button"
+              className="brut-btn brut-btn-white brut-btn-full"
               style={{ marginTop: 10, fontSize: 12.5 }}
-              disabled={busy} onClick={() => setStep("PHONE")}>
+              disabled={busy}
+              onClick={() => setStep("PHONE")}
+            >
               ← Use a different number
             </button>
           )}
         </form>
 
-        <button type="button" className="brut-btn brut-btn-white brut-btn-full" style={{ marginTop: 14, fontSize: 12.5 }}
-          onClick={() => window.open("http://localhost:5173/", "_blank")}>
-          Switch to Rider app →
+        <button
+          type="button"
+          className="brut-btn brut-btn-white brut-btn-full"
+          style={{ marginTop: 14, fontSize: 12.5 }}
+          onClick={() => window.open("http://localhost:5173/", "_blank")}
+        >
+          Switch to Rider App →
         </button>
       </div>
     </div>
-  );
-}
-
-export function DriverLanding({ onGetStarted }: { onGetStarted: () => void }) {
-  return (
-    <Landing audience="DRIVER" onGetStarted={onGetStarted} onDriverLogin={() => window.open("http://localhost:5173/", "_blank")} />
   );
 }

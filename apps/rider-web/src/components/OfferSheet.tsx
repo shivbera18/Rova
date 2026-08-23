@@ -81,52 +81,93 @@ export default function OfferSheet({
   }
 
   return (
-    <section className="card panel-card fare-builder">
-      <div className="spread">
-        <div className="row" style={{ gap: 10 }}>
-          <span className="vehicle-big-icon">{meta.icon}</span>
+    <section className="brut-card brut-card-elevated" style={{ padding: 22, maxWidth: 480, margin: "0 auto", background: "#ffffff" }}>
+      {/* Header */}
+      <div className="spread" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ gap: 12 }}>
+          <span style={{ fontSize: 32, padding: "4px 8px", background: "var(--paper-subtle)", borderRadius: "var(--radius-sm)", border: "var(--brut-border-thin)" }}>
+            {meta.icon}
+          </span>
           <div>
             <h3 style={{ fontSize: 18, textTransform: "none" }}>{meta.label}</h3>
-            <small className="muted">{meta.seats} · {quote.distanceKm} km · ~{quote.etaMin} min</small>
+            <span style={{ fontSize: 12, color: "var(--ink-muted)", fontWeight: 600 }}>
+              {meta.seats} · {quote.distanceKm} km · ~{quote.etaMin} min
+            </span>
           </div>
         </div>
-        <button className="btn-ghost compact" onClick={onClose} aria-label="Close">×</button>
+        <button
+          className="brut-btn brut-btn-white brut-btn-sm"
+          onClick={onClose}
+          aria-label="Close"
+          style={{ width: 32, height: 32, padding: 0, fontSize: 16 }}
+        >
+          ✕
+        </button>
       </div>
 
-      <div className="standard-fare-banner">
-        <span>STANDARD ESTIMATE</span>
-        <strong>{formatINR(paisa(quote.listPrice))}</strong>
+      {/* Benchmark Standard Fare Banner */}
+      <div
+        className="spread"
+        style={{
+          padding: "10px 14px",
+          background: "var(--paper-subtle)",
+          border: "var(--brut-border-thin)",
+          borderRadius: "var(--radius-sm)",
+          marginBottom: 18,
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-muted)", letterSpacing: "0.04em" }}>
+          Standard Benchmark Fare
+        </span>
+        <strong style={{ fontFamily: "var(--font-display)", fontSize: 17, color: "var(--ink)" }}>
+          {formatINR(paisa(quote.listPrice))}
+        </strong>
       </div>
 
-      <div className="fare-builder-title">
-        <span className="eyebrow">BUILD YOUR OFFER</span>
-        <h3>Choose where your money goes</h3>
-        <p>Both parts are editable. The driver sees only their take-home amount.</p>
-      </div>
-
-      <div className="fare-control driver-control">
-        <div className="fare-control-head">
-          <span className="fare-control-icon">🛵</span>
-          <div>
-            <strong>Driver take-home</strong>
-            <small>100% goes to your driver</small>
+      {/* Driver Take-home Fare Input */}
+      <div
+        className="brut-card"
+        style={{
+          padding: 16,
+          marginBottom: 14,
+          background: "#ffffff",
+          borderColor: "var(--ink)",
+        }}
+      >
+        <div className="spread" style={{ marginBottom: 8 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <span style={{ fontSize: 16 }}>🛵</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>Driver Take-Home</div>
+              <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>100% goes directly to driver</div>
+            </div>
           </div>
-          <span className="brut-badge brut-badge-green">NEGOTIABLE</span>
+          <span className="brut-badge brut-badge-green">YOUR OFFER</span>
         </div>
-        <div className="money-input">
-          <span>₹</span>
+
+        <div className="row" style={{ gap: 8, marginTop: 10 }}>
+          <span style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 800, color: "var(--ink)" }}>₹</span>
           <input
+            className="brut-input"
+            style={{ fontSize: 18, fontWeight: 700, padding: "8px 12px" }}
             aria-label="Amount going to driver"
             inputMode="decimal"
             value={driverInput}
             onChange={(e) => setDriverInput(e.target.value.replace(/[^0-9.]/g, ""))}
           />
         </div>
-        <div className="amount-chips">
+
+        <div className="row" style={{ gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           {[0, 0.5, 0.75, 0.9, 1].map((ratio) => {
             const amount = Math.round((quote.tripFare / 100) * ratio);
             return (
-              <button key={ratio} type="button" onClick={() => setDriverInput(String(amount))}>
+              <button
+                key={ratio}
+                type="button"
+                className="brut-btn brut-btn-white brut-btn-sm"
+                style={{ padding: "4px 8px", fontSize: 11.5 }}
+                onClick={() => setDriverInput(String(amount))}
+              >
                 {ratio === 0 ? "₹0" : ratio === 1 ? `Full ₹${amount}` : `${Math.round(ratio * 100)}% · ₹${amount}`}
               </button>
             );
@@ -134,64 +175,114 @@ export default function OfferSheet({
         </div>
       </div>
 
-      <div className="fare-control platform-control">
-        <div className="fare-control-head">
-          <span className="fare-control-icon">⚡</span>
-          <div>
-            <strong>Platform contribution</strong>
-            <small>Servers, dispatch, support & safety</small>
+      {/* Platform Contribution Input */}
+      <div
+        className="brut-card"
+        style={{
+          padding: 16,
+          marginBottom: 16,
+          background: "var(--paper-subtle)",
+          borderColor: "var(--ink)",
+        }}
+      >
+        <div className="spread" style={{ marginBottom: 8 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <span style={{ fontSize: 16 }}>⚡</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>Platform Fee</div>
+              <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>Servers, safety & dispatch</div>
+            </div>
           </div>
-          <i className="info-dot" tabIndex={0}>i<span className="info-tip">{EXPLAINER_COPY}</span></i>
-          <span className="brut-badge brut-badge-yellow">NEGOTIABLE</span>
+          <span className="brut-badge brut-badge-primary">TRANSPARENT</span>
         </div>
-        <div className="money-input">
-          <span>₹</span>
+
+        <div className="row" style={{ gap: 8, marginTop: 10 }}>
+          <span style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 800, color: "var(--ink)" }}>₹</span>
           <input
+            className="brut-input"
+            style={{ fontSize: 18, fontWeight: 700, padding: "8px 12px", background: "#ffffff" }}
             aria-label="Platform contribution"
             inputMode="decimal"
             value={platformInput}
             onChange={(e) => setPlatformInput(e.target.value.replace(/[^0-9.]/g, ""))}
           />
         </div>
-        <div className="amount-chips">
+
+        <div className="row" style={{ gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           {[0, 0.5, 1, 1.5].map((ratio) => {
             const amount = Math.round((quote.platformFeePaise / 100) * ratio * 100) / 100;
             return (
-              <button key={ratio} type="button" onClick={() => setPlatformInput(String(amount))}>
-                {ratio === 0 ? "₹0" : ratio === 1 ? `Suggested ₹${amount}` : `${ratio}× · ₹${amount}`}
+              <button
+                key={ratio}
+                type="button"
+                className="brut-btn brut-btn-white brut-btn-sm"
+                style={{ padding: "4px 8px", fontSize: 11.5 }}
+                onClick={() => setPlatformInput(String(amount))}
+              >
+                {ratio === 0 ? "₹0" : ratio === 1 ? `Standard ₹${amount}` : `${ratio}× · ₹${amount}`}
               </button>
             );
           })}
         </div>
       </div>
 
-      <div className="net-total-card">
-        <div>
-          <span>YOUR NET TOTAL</span>
-          <strong>{formatINR(paisa(totalPaise))}</strong>
+      {/* Net Total Summary Card */}
+      <div
+        className="brut-card brut-card-primary"
+        style={{
+          padding: 16,
+          marginBottom: 16,
+          borderRadius: "var(--radius-sm)",
+        }}
+      >
+        <div className="spread">
+          <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
+            Total You Pay
+          </span>
+          <strong style={{ fontFamily: "var(--font-display)", fontSize: 24, color: "var(--ink)" }}>
+            {formatINR(paisa(totalPaise))}
+          </strong>
         </div>
-        <div className="net-breakdown">
-          <span>Driver {formatINR(paisa(Math.max(0, driverPaise)))}</span>
-          <b>+</b>
-          <span>Platform {formatINR(paisa(Math.max(0, platformPaise)))}</span>
+
+        <div className="row" style={{ gap: 8, fontSize: 12, color: "var(--ink-soft)", marginTop: 6 }}>
+          <span>Driver: {formatINR(paisa(Math.max(0, driverPaise)))}</span>
+          <span>+</span>
+          <span>Platform: {formatINR(paisa(Math.max(0, platformPaise)))}</span>
         </div>
-        {savingsVsList > 0 && <small>You save {formatINR(paisa(savingsVsList))} vs standard estimate</small>}
-        {savingsVsList < 0 && <small className="generous">You contribute {formatINR(paisa(-savingsVsList))} above estimate</small>}
+
+        {savingsVsList > 0 && (
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--green)", marginTop: 6 }}>
+            ✨ You save {formatINR(paisa(savingsVsList))} compared to standard estimate
+          </div>
+        )}
       </div>
 
-      {error && <div className="error-text">{error}</div>}
+      {error && (
+        <div
+          className="brut-badge brut-badge-red"
+          style={{ width: "100%", padding: "8px 12px", marginBottom: 12, textTransform: "none", fontSize: 13 }}
+        >
+          ⚠️ {error}
+        </div>
+      )}
 
-      <div className="row" style={{ marginTop: 14 }}>
+      {/* Actions */}
+      <div className="row" style={{ gap: 10 }}>
         <button
-          className="btn-primary"
-          style={{ flex: 1 }}
+          className="brut-btn brut-btn-primary"
+          style={{ flex: 1, padding: "12px 18px", fontSize: 14 }}
           disabled={busy || !amountsValid}
           onClick={() => void submit(true)}
         >
           Send {formatINR(paisa(totalPaise))} Offer
         </button>
-        <button className="btn-ghost" disabled={busy} onClick={() => void submit(false)}>
-          Book standard
+        <button
+          className="brut-btn brut-btn-white"
+          style={{ padding: "12px 18px", fontSize: 14 }}
+          disabled={busy}
+          onClick={() => void submit(false)}
+        >
+          Book Standard
         </button>
       </div>
     </section>

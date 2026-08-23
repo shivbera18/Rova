@@ -1,13 +1,12 @@
 /**
- * Pricing Engine — plan §7.4. Pure functions over a fare card; the only IO is reading
- * the card via the config cache. Quote tokens are HMAC-signed so POST /requests can
- * trust list_price without re-quoting. No map vendor in v1: haversine × road factor
- * (upgrade path: plan §7.2 ETA service).
+ * Pricing Engine — fare-card computation plus signed quote tokens.
+ * Road distance and duration come from free OSRM routing with a deterministic fallback.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Paise, VehicleClass } from "@chalo/protocol";
 import { distanceKm, platformFee } from "@chalo/protocol";
 import { getFareCard } from "./config.ts";
+import { getRoadRoute, type RoadRoute } from "./routing.ts";
 import type { LatLon, SqlRowClient } from "./types.ts";
 import type { FareCardRow } from "./db/rows.ts";
 
@@ -16,6 +15,9 @@ const secretKey = process.env.JWT_SECRET ?? "dev-only-secret-rotate-in-prod";
 export interface Quote {
   vehicleClass: VehicleClass;
   etaMin: number;
+  freeFlowEtaMin: number;
+  trafficLevel: RoadRoute["trafficLevel"];
+  routeSource: RoadRoute["source"];
   distanceKm: number;
   listPrice: Paise;
   tripFare: Paise;
@@ -23,26 +25,23 @@ export interface Quote {
   softFloor: Paise;
 }
 
-/** # ponytail: straight-line haversine × 1.35 road factor replaces map APIs until beta */
-const ROAD_FACTOR = 1.35;
-
+/** Fast synchronous approximation retained for dispatch-card distance display. */
 export function estimateDistanceKm(a: LatLon, b: LatLon): number {
-  return Math.max(0.5, distanceKm(a, b) * ROAD_FACTOR);
+  return Math.max(0.5, distanceKm(a, b) * 1.35);
 }
 
 export function quoteFromCard(
   card: FareCardRow,
   km: number,
   surgeMultiplier = 1,
+  durationMin = 12,
 ): { listPrice: Paise; tripFare: Paise; platformFeePaise: Paise } {
   const pct = Number(card.platform_fee_pct);
   const nightMult = Number(card.night_multiplier);
   const hour = new Date().getHours();
   const night = hour >= 23 || hour < 5 ? nightMult : 1;
-
-  // ~12 min per trip segment assumption folded into time charge until ETA service exists
   const metered = Math.round(
-    (card.base_paise + (km * card.per_km_paise) / 1 + (12 * card.per_min_paise) / 1) *
+    (card.base_paise + km * card.per_km_paise + durationMin * card.per_min_paise) *
       surgeMultiplier *
       night,
   );
@@ -63,17 +62,23 @@ export async function quoteTrip(
   pickup: LatLon,
   drop: LatLon,
 ): Promise<Quote> {
-  const card = await getFareCard(sql, cityId, vehicleClass);
-  const km = estimateDistanceKm(pickup, drop);
-  return buildQuote(card, km, vehicleClass);
-}
-
-function buildQuote(card: FareCardRow, km: number, vehicleClass: VehicleClass): Quote {
-  const { listPrice, tripFare, platformFeePaise } = quoteFromCard(card, km);
+  const [card, route] = await Promise.all([
+    getFareCard(sql, cityId, vehicleClass),
+    getRoadRoute(pickup, drop),
+  ]);
+  const { listPrice, tripFare, platformFeePaise } = quoteFromCard(
+    card,
+    route.distanceKm,
+    1,
+    route.durationMin,
+  );
   return {
     vehicleClass,
-    etaMin: Math.max(2, Math.round(km * 2.2)),
-    distanceKm: Math.round(km * 10) / 10,
+    etaMin: route.durationMin,
+    freeFlowEtaMin: route.freeFlowDurationMin,
+    trafficLevel: route.trafficLevel,
+    routeSource: route.source,
+    distanceKm: route.distanceKm,
     listPrice,
     tripFare,
     platformFeePaise,
@@ -84,13 +89,13 @@ function buildQuote(card: FareCardRow, km: number, vehicleClass: VehicleClass): 
 // ---- signed quote tokens ---------------------------------------------------
 
 interface QuoteTokenPayload {
-  c: number; // city id
+  c: number;
   v: VehicleClass;
-  lp: number; // list price paise
-  tf: number; // trip fare paise
-  pf: number; // platform fee paise
+  lp: number;
+  tf: number;
+  pf: number;
   km: number;
-  exp: number; // epoch ms
+  exp: number;
 }
 
 function sign(body: string): string {
@@ -117,12 +122,7 @@ export function verifyQuoteToken(token: string): QuoteTokenPayload | null {
   const body = token.slice(0, dot);
   const sig = token.slice(dot + 1);
   const expected = sign(body);
-  if (
-    !(
-      expected.length === sig.length &&
-      timingSafeEqual(Buffer.from(expected), Buffer.from(sig))
-    )
-  ) {
+  if (!(expected.length === sig.length && timingSafeEqual(Buffer.from(expected), Buffer.from(sig)))) {
     return null;
   }
   try {

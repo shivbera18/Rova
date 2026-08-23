@@ -9,7 +9,8 @@
     "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types --experimental-detect-module src/**/*.test.ts",
-    "test:verify": "tsx src/verify-all.ts"
+    "test:e2e": "tsx --env-file-if-exists=.env src/e2e-fullflow.ts",
+    "test:verify": "tsx --env-file-if-exists=.env src/verify-all.ts"
   },
   "dependencies": {
     "@chalo/protocol": "workspace:*",

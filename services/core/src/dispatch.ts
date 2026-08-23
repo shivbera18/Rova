@@ -7,6 +7,7 @@
 import type { DriverOfferPayload, DriverWsMessage, Paise } from "@chalo/protocol";
 import { distanceKm } from "@chalo/protocol";
 import { publish } from "./bus.ts";
+import { logger } from "./logger.ts";
 import type { LatLon } from "./types.ts";
 
 export interface LiveDriver {
@@ -28,10 +29,14 @@ const claims: Record<string, string> = {};
 
 export function registerDriver(d: LiveDriver): void {
   liveDrivers[d.driverId] = d;
+  logger.dispatch(`Driver registered: id=${d.driverId.slice(0, 8)} class=${d.vehicleClass} pos=(${d.pos.lat.toFixed(4)},${d.pos.lng.toFixed(4)}) online=${d.online}`);
 }
 
 export function unregisterDriver(driverId: string): void {
-  delete liveDrivers[driverId];
+  if (liveDrivers[driverId]) {
+    delete liveDrivers[driverId];
+    logger.dispatch(`Driver unregistered: id=${driverId.slice(0, 8)}`);
+  }
 }
 
 export function getLiveDriver(driverId: string): LiveDriver | null {
@@ -40,17 +45,24 @@ export function getLiveDriver(driverId: string): LiveDriver | null {
 
 export function setDriverPos(driverId: string, pos: LatLon): void {
   const d = liveDrivers[driverId];
-  if (d) d.pos = pos;
+  if (d) {
+    d.pos = pos;
+    logger.dispatch(`Driver position updated: id=${driverId.slice(0, 8)} pos=(${pos.lat.toFixed(4)},${pos.lng.toFixed(4)})`);
+  }
 }
 
 export function setDriverVehicleClass(driverId: string, vehicleClass: string): void {
   const d = liveDrivers[driverId];
-  if (d) d.vehicleClass = vehicleClass;
+  if (d) {
+    d.vehicleClass = vehicleClass;
+    logger.dispatch(`Driver vehicle class changed: id=${driverId.slice(0, 8)} class=${vehicleClass}`);
+  }
 }
 
 export function claimRequest(requestId: string, driverId: string): boolean {
   if (claims[requestId]) return false;
   claims[requestId] = driverId;
+  logger.dispatch(`Request claimed: req=${requestId.slice(0, 8)} driver=${driverId.slice(0, 8)}`);
   return true;
 }
 
@@ -60,6 +72,7 @@ export function claimedDriver(requestId: string): string | null {
 
 export function releaseClaim(requestId: string): void {
   delete claims[requestId];
+  logger.dispatch(`Claim released: req=${requestId.slice(0, 8)}`);
 }
 
 export interface BroadcastOffer {
@@ -80,16 +93,36 @@ export interface BroadcastOffer {
 }
 
 /**
- * Ring broadcast per §7.3: inner ring first (~1.5 km), widening to ~15 km for local testing.
+ * Ring broadcast per §7.3: inner ring first (~1.5 km), widening to ~20 km for local testing.
  * Returns how many drivers received it.
  */
 export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
   let delivered = 0;
-  for (const d of Object.values(liveDrivers)) {
-    if (d.vehicleClass !== "ALL" && d.vehicleClass !== offer.vehicleClass) continue;
-    if (!d.online || d.onTrip) continue;
+  const allDrivers = Object.values(liveDrivers);
+  logger.dispatch(
+    `Broadcasting offer: req=${offer.requestId.slice(0, 8)} class=${offer.vehicleClass} pay=₹${(offer.takeHomePaise / 100).toFixed(0)} pickup=(${offer.pickup.lat.toFixed(4)},${offer.pickup.lng.toFixed(4)}) | Total live drivers: ${allDrivers.length}`,
+  );
+
+  for (const d of allDrivers) {
+    if (d.vehicleClass !== "ALL" && d.vehicleClass !== offer.vehicleClass) {
+      logger.dispatch(
+        `  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) SKIPPED: vehicle class mismatch (driver=${d.vehicleClass}, requested=${offer.vehicleClass})`,
+      );
+      continue;
+    }
+    if (!d.online) {
+      logger.dispatch(`  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) SKIPPED: driver is OFFLINE`);
+      continue;
+    }
+    if (d.onTrip) {
+      logger.dispatch(`  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) SKIPPED: driver is busy on a trip`);
+      continue;
+    }
     const km = distanceKm(d.pos, offer.pickup);
-    if (km > 15) continue; // 15 km search radius for city-wide matching
+    if (km > 20) {
+      logger.dispatch(`  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) SKIPPED: too far (${km.toFixed(1)} km > 20 km)`);
+      continue;
+    }
 
     const payload: DriverOfferPayload = {
       requestId: offer.requestId,
@@ -106,8 +139,16 @@ export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
       drop: offer.drop,
       paymentMethod: offer.paymentMethod as DriverOfferPayload["paymentMethod"],
     };
-    if (d.push({ t: "dispatch.offer", offer: payload })) delivered++;
+    const sent = d.push({ t: "dispatch.offer", offer: payload });
+    if (sent) {
+      delivered++;
+      logger.dispatch(`  -> Driver ${d.driverId.slice(0, 8)} (${d.name}, ${d.vehicleClass}) DELIVERED (dist=${km.toFixed(1)} km)`);
+    } else {
+      logger.dispatch(`  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) FAILED: socket not ready`);
+    }
   }
+
+  logger.dispatch(`Broadcast summary: req=${offer.requestId.slice(0, 8)} delivered to ${delivered} driver(s)`);
   return delivered;
 }
 
@@ -115,5 +156,6 @@ export async function cancelBroadcast(requestId: string): Promise<void> {
   for (const d of Object.values(liveDrivers)) {
     d.push({ t: "dispatch.cancel", requestId });
   }
+  logger.dispatch(`Broadcast cancelled: req=${requestId.slice(0, 8)}`);
   await publish("dispatch.cancelled", { requestId });
 }

@@ -16,6 +16,8 @@ import { VEHICLE_CLASSES } from "@chalo/protocol";
 import { openStorage } from "./db/storage.ts";
 import type { Storage } from "./db/storage.ts";
 import { runMigrations } from "./db/migrate.ts";
+import { logger } from "./logger.ts";
+import { seedData } from "./db/seed.ts";
 import { DEV_OTP, issueToken, upsertUser, verifyToken } from "./auth.ts";
 import { walletBalance } from "./ledger.ts";
 import { estimateDistanceKm, issueQuoteToken, quoteTrip, verifyQuoteToken } from "./pricing.ts";
@@ -83,7 +85,6 @@ interface Session {
 function fail(statusCode: number, code: string, message: string): never {
   throw Object.assign(new Error(message), { statusCode, code });
 }
-
 export async function startServer(listenPort = PORT): Promise<{
   app: ReturnType<typeof Fastify>;
   storage: Storage;
@@ -93,9 +94,24 @@ export async function startServer(listenPort = PORT): Promise<{
   const sql = storage.sql;
   await runMigrations(sql);
 
+  // Auto-seed pilot city fare cards if database is fresh
+  const cardsCheck = await sql.query<{ c: string }>("SELECT COUNT(*) AS c FROM fare_cards");
+  if (Number(cardsCheck.rows[0]?.c ?? 0) === 0) {
+    logger.info("BOOT", "Auto-seeding Bengaluru pilot fare cards & negotiation rules");
+    await seedData(sql);
+  }
+
   const app = Fastify({ logger: false });
   await app.register(cors, { origin: true });
   await app.register(websocket);
+
+  app.addHook("onRequest", async (req) => {
+    (req as any)._startTime = performance.now();
+  });
+  app.addHook("onResponse", async (req, reply) => {
+    const start = (req as any)._startTime ?? performance.now();
+    logger.http(req.method, req.url, reply.statusCode, performance.now() - start);
+  });
   async function session(req: FastifyRequest): Promise<Session | null> {
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) return null;
@@ -645,7 +661,13 @@ export async function startServer(listenPort = PORT): Promise<{
         return;
       }
       riderConns[sess.userId] = { socket };
-      socket.on("close", () => delete riderConns[sess.userId]);
+      logger.ws("rider", "Connected", sess.userId);
+      socket.on("close", () => {
+        if (riderConns[sess.userId]?.socket === socket) {
+          delete riderConns[sess.userId];
+          logger.ws("rider", "Disconnected", sess.userId);
+        }
+      });
     })();
   });
 
@@ -677,6 +699,7 @@ export async function startServer(listenPort = PORT): Promise<{
         return;
       }
       driverConns[sess.userId] = { socket };
+      logger.ws("driver", "Connected", sess.userId);
 
       registerDriver({
         driverId: sess.userId,
@@ -707,11 +730,15 @@ export async function startServer(listenPort = PORT): Promise<{
         }
       });
       socket.on("close", () => {
-        delete driverConns[sess.userId];
-        unregisterDriver(sess.userId);
+        if (driverConns[sess.userId]?.socket === socket) {
+          delete driverConns[sess.userId];
+          unregisterDriver(sess.userId);
+          logger.ws("driver", "Disconnected", sess.userId);
+        }
       });
     })();
   });
+  if (process.env.NODE_ENV !== "production") {
     app.get("/v1/dev/requests", async () => {
       const r = await sql.query("SELECT id, state, mode FROM ride_requests");
       return { rows: r.rows };
@@ -720,7 +747,7 @@ export async function startServer(listenPort = PORT): Promise<{
       const t = await sql.query<{ id: string }>("SELECT id FROM trips WHERE state='COMPLETED' ORDER BY id DESC LIMIT 1");
       return { tripId: t.rows[0]?.id ?? null };
     });
-
+  }
   // ---- ratings, history, driver summary (consumed by the web consoles) ----
 
   app.post("/v1/trips/:id/rate", async (req) => {

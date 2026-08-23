@@ -548,14 +548,29 @@ async function runVerification(): Promise<void> {
     assert(meRes.json.walletBalancePaise > 0, "Driver wallet balance reflects earnings from completed trips");
   }
 
-  // --- Scenario I: Role Mismatch & Driver KYC Gate (C4 Fix) ---
+  // --- Scenario I: Role Mismatch & Driver KYC Gate ---
   console.log("\n  [Scenario I] Role Protection & KYC Approval Gate");
   {
-    // Attempting to log in with an existing rider phone as DRIVER must be rejected
     const roleMismatch = await api("/v1/auth/otp/verify", { phone: "+919900000001", otp: "123456", role: "DRIVER" });
-    assert(roleMismatch.status === 400 || roleMismatch.status === 403 || roleMismatch.json.code === "ROLE_MISMATCH", "Rider phone cannot masquerade as DRIVER (HTTP 400/403 ROLE_MISMATCH)");
+    assert(roleMismatch.status === 400 || roleMismatch.status === 403 || roleMismatch.json.code === "ROLE_MISMATCH", "Rider phone cannot masquerade as DRIVER");
   }
 
+  // --- Scenario K: Single Vehicle Driver Registration ---
+  console.log("\n  [Scenario K] Immutable Single-Vehicle Driver Registration");
+  {
+    const phone = `+9198${Date.now().toString().slice(-8)}`;
+    const registration = await api("/v1/auth/otp/verify", {
+      phone,
+      otp: "123456",
+      role: "DRIVER",
+      vehicleClass: "AUTO",
+    });
+    assert(registration.status === 200 && !!registration.json.token, "New driver registers with one selected vehicle");
+    const profile = await api("/v1/driver/me", undefined, registration.json.token);
+    assert(profile.json.profile.vehicle_class === "AUTO", "Driver profile stores selected vehicle as AUTO");
+    const change = await api("/v1/driver/status", { vehicleClass: "BIKE" }, registration.json.token);
+    assert(change.status === 409 && change.json.code === "VEHICLE_IMMUTABLE", "Driver cannot switch to a second vehicle in console");
+  }
   // --- Scenario J: Background Negotiation Expiry Sweeper (C1 Fix) ---
   console.log("\n  [Scenario J] Background Negotiation Expiry Sweeper");
   {

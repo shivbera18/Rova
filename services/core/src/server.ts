@@ -41,7 +41,6 @@ import {
   registerDriver,
   releaseClaim,
   setDriverPos,
-  setDriverVehicleClass,
   unregisterDriver,
 } from "./dispatch.ts";
 import {
@@ -162,9 +161,28 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!p || p.kyc_status !== "APPROVED") {
       fail(403, "KYC_NOT_APPROVED", "Driver account is not KYC approved");
     }
-    if (vehicleClass && p.vehicle_class !== "ALL" && p.vehicle_class !== vehicleClass) {
+    if (vehicleClass && p.vehicle_class !== vehicleClass) {
       fail(403, "VEHICLE_CLASS_MISMATCH", `Driver vehicle (${p.vehicle_class}) does not match ride (${vehicleClass})`);
     }
+  }
+
+  async function ensureDriverVehicle(driverId: string, requested?: string): Promise<string> {
+    const existing = await sql.query<{ vehicle_class: string }>(
+      "SELECT vehicle_class FROM driver_profiles WHERE user_id=$1",
+      [driverId],
+    );
+    if (existing.rows[0]) return existing.rows[0].vehicle_class;
+    const allowed = ["BIKE", "AUTO", "CAB_MINI", "CAB_PRIME", "CAB_XL"];
+    if (!requested || !allowed.includes(requested)) {
+      fail(400, "VEHICLE_REQUIRED", "Select one valid vehicle when registering as a driver");
+    }
+    await sql.query(
+      `INSERT INTO driver_profiles
+       (user_id, vehicle_class, plate, kyc_status, online, on_trip)
+       VALUES ($1,$2,$3,'APPROVED',false,false)`,
+      [driverId, requested, `PENDING-${driverId.slice(0, 6).toUpperCase()}`],
+    );
+    return requested;
   }
 
   // ---- auth ------------------------------------------------------------------
@@ -177,33 +195,35 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/auth/otp/verify", async (req) => {
-    const { phone, otp, role, fullName } = req.body as {
+    const { phone, otp, role, fullName, vehicleClass } = req.body as {
       phone?: string;
       otp?: string;
       role?: "RIDER" | "DRIVER";
       fullName?: string;
+      vehicleClass?: string;
     };
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
     if (otp !== DEV_OTP) fail(401, "BAD_OTP", "wrong code");
     const user = await upsertUser(sql, phone!, role!, fullName ?? "Chalo user");
+    if (role === "DRIVER") await ensureDriverVehicle(user.id, vehicleClass);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
   });
-
   // Password login: first sign-up registers the password; later logins verify it.
   app.post("/v1/auth/login/password", async (req) => {
-    const { phone, password, role } = req.body as {
+    const { phone, password, role, vehicleClass } = req.body as {
       phone?: string;
       password?: string;
       role?: "RIDER" | "DRIVER";
+      vehicleClass?: string;
     };
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
     if (!password || typeof password !== "string" || password.length < 4) {
       fail(400, "WEAK_PASSWORD", "password must be at least 4 characters");
     }
     const user = await upsertUserWithPassword(sql, phone!, role!, password);
+    if (role === "DRIVER") await ensureDriverVehicle(user.id, vehicleClass);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
   });
-
   app.post("/v1/quotes", async (req) => {
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
     if (!body.pickup || !body.drop) fail(400, "BAD_BODY", "pickup and drop required");
@@ -924,14 +944,17 @@ export async function startServer(listenPort = PORT): Promise<{
   app.post("/v1/driver/status", async (req) => {
     const sess = requireDriver(await session(req));
     const body = req.body as { online?: boolean; vehicleClass?: string; lat?: number; lng?: number };
+    const current = await sql.query<{ vehicle_class: string }>(
+      "SELECT vehicle_class FROM driver_profiles WHERE user_id=$1",
+      [sess.userId],
+    );
+    if (typeof body.vehicleClass === "string" && current.rows[0]?.vehicle_class !== body.vehicleClass) {
+      fail(409, "VEHICLE_IMMUTABLE", "Vehicle changes require document review and are not allowed in the driver console");
+    }
     if (typeof body.online === "boolean") {
       await sql.query("UPDATE driver_profiles SET online=$2 WHERE user_id=$1", [sess.userId, body.online]);
       const live = getLiveDriver(sess.userId);
       if (live) live.online = body.online;
-    }
-    if (typeof body.vehicleClass === "string") {
-      await sql.query("UPDATE driver_profiles SET vehicle_class=$2 WHERE user_id=$1", [sess.userId, body.vehicleClass]);
-      setDriverVehicleClass(sess.userId, body.vehicleClass);
     }
     if (typeof body.lat === "number" && typeof body.lng === "number") {
       await sql.query("UPDATE driver_profiles SET last_lat=$2, last_lng=$3 WHERE user_id=$1", [sess.userId, body.lat, body.lng]);

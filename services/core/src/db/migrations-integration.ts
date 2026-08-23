@@ -25,4 +25,10 @@ export const MIGRATIONS_INTEGRATION = [
     CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions (user_id);
     `,
   },
+  {
+    id: "0007_single_vehicle_cleanup",
+    sql: `
+    UPDATE driver_profiles SET vehicle_class='BIKE' WHERE vehicle_class='ALL';
+    `,
+  },
 ];

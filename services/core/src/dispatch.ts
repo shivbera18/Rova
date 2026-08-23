@@ -51,13 +51,6 @@ export function setDriverPos(driverId: string, pos: LatLon): void {
   }
 }
 
-export function setDriverVehicleClass(driverId: string, vehicleClass: string): void {
-  const d = liveDrivers[driverId];
-  if (d) {
-    d.vehicleClass = vehicleClass;
-    logger.dispatch(`Driver vehicle class changed: id=${driverId.slice(0, 8)} class=${vehicleClass}`);
-  }
-}
 
 export function claimRequest(requestId: string, driverId: string): boolean {
   if (claims[requestId]) return false;
@@ -106,7 +99,7 @@ export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
   );
 
   for (const d of allDrivers) {
-    if (d.vehicleClass !== "ALL" && d.vehicleClass !== offer.vehicleClass) {
+    if (d.vehicleClass !== offer.vehicleClass) {
       logger.dispatch(
         `  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) SKIPPED: vehicle class mismatch (driver=${d.vehicleClass}, requested=${offer.vehicleClass})`,
       );

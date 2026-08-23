@@ -19,7 +19,6 @@ import { runMigrations } from "./db/migrate.ts";
 import { logger } from "./logger.ts";
 import { seedData } from "./db/seed.ts";
 import { DEV_OTP, issueToken, upsertUser, verifyToken } from "./auth.ts";
-import { walletBalance } from "./ledger.ts";
 import { estimateDistanceKm, issueQuoteToken, quoteTrip, verifyQuoteToken } from "./pricing.ts";
 import {
   cancelByRider,
@@ -55,6 +54,7 @@ import {
   TripError,
   verifyStartOtp,
 } from "./trips.ts";
+import { walletBalance } from "./ledger.ts";
 import type { LatLon } from "./types.ts";
 import type { TripRow } from "./db/rows.ts";
 
@@ -86,6 +86,7 @@ interface Session {
 function fail(statusCode: number, code: string, message: string): never {
   throw Object.assign(new Error(message), { statusCode, code });
 }
+
 export async function startServer(listenPort = PORT): Promise<{
   app: ReturnType<typeof Fastify>;
   storage: Storage;
@@ -113,6 +114,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const start = (req as any)._startTime ?? performance.now();
     logger.http(req.method, req.url, reply.statusCode, performance.now() - start);
   });
+
   async function session(req: FastifyRequest): Promise<Session | null> {
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) return null;
@@ -127,6 +129,24 @@ export async function startServer(listenPort = PORT): Promise<{
     }
     return tokenSess;
   }
+
+  function requireAuth(sess: Session | null): Session {
+    if (!sess) fail(401, "UNAUTHORIZED", "Sign in required");
+    return sess;
+  }
+
+  function requireRider(sess: Session | null): Session {
+    if (!sess) fail(401, "UNAUTHORIZED", "Sign in required");
+    if (sess.role !== "RIDER") fail(403, "FORBIDDEN", "Rider account required");
+    return sess;
+  }
+
+  function requireDriver(sess: Session | null): Session {
+    if (!sess) fail(401, "UNAUTHORIZED", "Sign in required");
+    if (sess.role !== "DRIVER") fail(403, "FORBIDDEN", "Driver account required");
+    return sess;
+  }
+
   async function requireApprovedDriver(driverId: string, vehicleClass?: string): Promise<void> {
     const r = await sql.query<{ kyc_status: string; vehicle_class: string }>(
       "SELECT kyc_status, vehicle_class FROM driver_profiles WHERE user_id=$1",
@@ -140,6 +160,9 @@ export async function startServer(listenPort = PORT): Promise<{
       fail(403, "VEHICLE_CLASS_MISMATCH", `Driver vehicle (${p.vehicle_class}) does not match ride (${vehicleClass})`);
     }
   }
+
+  // ---- auth ------------------------------------------------------------------
+
   app.post("/v1/auth/otp/send", async (req) => {
     const { phone } = req.body as { phone?: string };
     if (!phone || !/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
@@ -162,8 +185,8 @@ export async function startServer(listenPort = PORT): Promise<{
   // ---- quotes ----------------------------------------------------------------
 
   app.post("/v1/quotes", async (req) => {
-    const sess = await session(req);
-    if (!sess) fail(401, "UNAUTHORIZED", "sign in first");
+    const sess = requireAuth(await session(req));
+    void sess;
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
     if (!body.pickup || !body.drop) fail(400, "BAD_BODY", "pickup and drop required");
 
@@ -187,8 +210,7 @@ export async function startServer(listenPort = PORT): Promise<{
   // ---- ride requests -----------------------------------------------------------
 
   app.post("/v1/requests", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "RIDER") fail(403, "FORBIDDEN", "rider only");
+    const sess = requireRider(await session(req));
     const body = req.body as {
       quoteToken?: string;
       offerPaise?: number;
@@ -249,7 +271,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const delivered = await broadcastRequest({
       requestId,
       negotiationId,
-      takeHomePaise: negotiated ? body.offerPaise! : (payload!.tf),
+      takeHomePaise: negotiated ? body.offerPaise! : payload!.tf,
       pickup: body.pickup!,
       drop: body.drop!,
       expiresAt: expiresAt.toISOString(),
@@ -313,8 +335,7 @@ export async function startServer(listenPort = PORT): Promise<{
   }
 
   app.get("/v1/requests/:id", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "RIDER") fail(403, "FORBIDDEN", "rider only");
+    const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
     const r = await sql.query<Record<string, unknown>>(
       "SELECT * FROM ride_requests WHERE id=$1 AND rider_id=$2",
@@ -329,8 +350,7 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/requests/:id/cancel", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "RIDER") fail(403, "FORBIDDEN", "rider only");
+    const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
     const upd = await sql.query(
       "UPDATE ride_requests SET state='CANCELLED', version=version+1 WHERE id=$1 AND rider_id=$2 AND state IN ('MATCHING','NEGOTIATING') RETURNING id",
@@ -343,8 +363,6 @@ export async function startServer(listenPort = PORT): Promise<{
     );
     for (const n of negs.rows) await cancelByRider(sql, n.id).catch(() => undefined);
     releaseClaim(id);
-    // tell every live driver their offer card is dead — otherwise stale offers
-    // linger on the driver console and accepts fail later with NOT_CLAIMABLE
     void cancelBroadcast(id);
     return { ok: true };
   });
@@ -353,8 +371,7 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.post("/v1/requests/:id/accept", async (req) => {
     // DRIVER accepts a LIST-price offer (no negotiation attached)
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     const rr = (
       await sql.query<{ mode: string; state: string; vehicle_class: string }>(
@@ -371,8 +388,7 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.post("/v1/negotiations/:id/accept", async (req) => {
     // DRIVER accepts the rider-side offer
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     try {
       const neg0 = await getNegotiation(sql, id);
@@ -389,8 +405,7 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.post("/v1/negotiations/:id/counter", async (req) => {
     // DRIVER counters with take-home ask; first counter claims the negotiation
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     const { paise } = req.body as { paise?: number };
     if (typeof paise !== "number") fail(400, "BAD_BODY", "paise required");
@@ -418,8 +433,7 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.post("/v1/negotiations/:id/rider-accept", async (req) => {
     // RIDER accepts a driver counter — the claiming driver gets the trip
-    const sess = await session(req);
-    if (!sess || sess.role !== "RIDER") fail(403, "FORBIDDEN", "rider only");
+    const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
     try {
       const neg = await riderAcceptCounter(sql, id);
@@ -435,8 +449,7 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.post("/v1/negotiations/:id/final", async (req) => {
     // RIDER final closing offer after a driver counter
-    const sess = await session(req);
-    if (!sess || sess.role !== "RIDER") fail(403, "FORBIDDEN", "rider only");
+    const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
     const { paise } = req.body as { paise?: number };
     if (typeof paise !== "number") fail(400, "BAD_BODY", "paise required");
@@ -481,13 +494,18 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/negotiations/:id/rider-decline", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "RIDER") fail(403, "FORBIDDEN", "rider only");
+    const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
+    const neg0 = await getNegotiation(sql, id);
+    if (!neg0) fail(404, "NOT_FOUND", "no such negotiation");
+    if (neg0.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
+    if (neg0.state === "DECLINED") {
+      return { ok: true };
+    }
     try {
       const neg = await riderDecline(sql, id);
       releaseClaim(neg.request_id);
-      void cancelBroadcast(neg.request_id); // clear the offer card on driver consoles
+      void cancelBroadcast(neg.request_id);
       return { ok: true };
     } catch (err) {
       if (err instanceof NegotationError) fail(409, err.code, err.message);
@@ -498,8 +516,7 @@ export async function startServer(listenPort = PORT): Promise<{
   // ---- trips ----------------------------------------------------------------------
 
   app.post("/v1/trips/:id/state", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     const { to } = req.body as { to?: "ARRIVING" | "ARRIVED" };
     if (to !== "ARRIVING" && to !== "ARRIVED") fail(400, "BAD_BODY", "to must be ARRIVING|ARRIVED");
@@ -515,16 +532,16 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/trips/:id/start", async (req) => {
-    // RIDER shares the OTP; driver hits start — but either party may call this with
-    // the correct code; the check is against the hashed OTP.
-    const sess = await session(req);
-    if (!sess) fail(401, "UNAUTHORIZED", "sign in");
+    const sess = requireAuth(await session(req));
     const { id } = req.params as { id: string };
     const { otp } = req.body as { otp?: string };
     const trip = await getTrip(sql, id);
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
     if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {
       fail(403, "FORBIDDEN", "not your trip");
+    }
+    if (trip.state === "ONGOING") {
+      return { state: "ONGOING" };
     }
     if (!(await verifyStartOtp(sql, id, otp ?? ""))) fail(401, "BAD_OTP", "wrong OTP");
     const updated = await transitionTrip(sql, id, "ONGOING");
@@ -534,17 +551,25 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/trips/:id/complete", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     const { tipPaise } = req.body as { tipPaise?: number };
 
-    // transition FIRST, then settle (settle requires COMPLETED)
+    const trip0 = await getTrip(sql, id);
+    if (!trip0) fail(404, "NOT_FOUND", "no such trip");
+    if (trip0.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
+
+    if (trip0.state === "COMPLETED") {
+      return { state: "COMPLETED", duplicate: true };
+    }
+
     try {
       await transitionTrip(sql, id, "COMPLETED");
       const settlement = await settleTrip(sql, id, tipPaise ?? 0);
 
       const trip = (await getTrip(sql, id))!;
+      const live = getLiveDriver(sess.userId);
+      if (live) live.onTrip = false;
       pushRider(trip.rider_id, { t: "trip.state", state: "COMPLETED" });
       pushDriver(sess.userId, { t: "trip.state", state: "COMPLETED", tripId: id });
       return { state: "COMPLETED", txnId: settlement.txnId, duplicate: settlement.duplicate };
@@ -555,8 +580,7 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.get("/v1/trips/:id", async (req) => {
-    const sess = await session(req);
-    if (!sess) fail(401, "UNAUTHORIZED", "sign in");
+    const sess = requireAuth(await session(req));
     const { id } = req.params as { id: string };
     const trip = await getTrip(sql, id);
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
@@ -567,8 +591,7 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/trips/:id/regenerate-otp", async (req) => {
-    const sess = await session(req);
-    if (!sess) fail(401, "UNAUTHORIZED", "sign in");
+    const sess = requireAuth(await session(req));
     const { id } = req.params as { id: string };
     const trip = await getTrip(sql, id);
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
@@ -581,6 +604,7 @@ export async function startServer(listenPort = PORT): Promise<{
       throw err;
     }
   });
+
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {
     const fare = readFareJson(trip.fare_json);
     const driver = getLiveDriver(trip.driver_id);
@@ -607,7 +631,6 @@ export async function startServer(listenPort = PORT): Promise<{
     negotiationId: string,
     driverId: string,
   ): Promise<{ tripId: string; otp: string }> {
-    // counter-time claim already belongs to this driver; a fresh accept claims anew
     const existing = claimedDriver(requestId);
     if (existing === null) {
       if (!claimRequest(requestId, driverId)) fail(409, "ALREADY_CLAIMED", "another driver won this ride");
@@ -632,8 +655,8 @@ export async function startServer(listenPort = PORT): Promise<{
     ).rows[0]!;
     const neg = negotiationId ? await getNegotiation(sql, negotiationId) : null;
     const agreed = neg?.current_offer ?? rr.list_price;
-    const fee =
-      neg?.platform_fee ?? rr.platform_fee ?? Math.max(1000, Math.round(agreed * 0.12));
+    const fee = neg?.platform_fee ?? rr.platform_fee ?? Math.max(1000, Math.round(agreed * 0.12));
+
     const { trip, otp } = await createTripFromAgreement(sql, {
       requestId,
       riderId: rr.rider_id,
@@ -653,9 +676,21 @@ export async function startServer(listenPort = PORT): Promise<{
     });
 
     const view = tripView({ ...trip, otpPlain: otp });
-    // OTP travels ONLY to the rider (plan §7.6: rider reads it to the driver)
     pushRider(rr.rider_id, { t: "driver.assigned", trip: { ...view, otp } as never });
-    pushDriver(driverId, { t: "trip.state", state: "DRIVER_ASSIGNED" });
+    pushDriver(driverId, { t: "trip.state", state: "DRIVER_ASSIGNED", tripId: trip.id });
+
+    // register live presence for tracking
+    registerDriver({
+      driverId,
+      vehicleClass: rr.vehicle_class,
+      pos: { lat: rr.pickup_lat, lng: rr.pickup_lng },
+      online: true,
+      onTrip: true,
+      name: "Driver",
+      plate: "KA01AB1234",
+      rating: 4.8,
+      push: (msg) => pushDriver(driverId, msg),
+    });
 
     return { tripId: trip.id, otp };
   }
@@ -722,9 +757,9 @@ export async function startServer(listenPort = PORT): Promise<{
         pos: { lat: profile.last_lat ?? 12.97, lng: profile.last_lng ?? 77.59 },
         online: true,
         onTrip: false,
-        name: profile?.full_name ?? "Driver",
-        plate: profile?.plate ?? "KA00XX0000",
-        rating: Number(profile?.rating_rolling ?? 4.8),
+        name: profile.full_name ?? "Driver",
+        plate: profile.plate ?? "KA00XX0000",
+        rating: Number(profile.rating_rolling ?? 4.8),
         push: (msg) => pushDriver(sess.userId, msg),
       });
 
@@ -753,7 +788,24 @@ export async function startServer(listenPort = PORT): Promise<{
       });
     })();
   });
+
+  // ---- dev verification endpoints (never in production) ----
   if (process.env.NODE_ENV !== "production") {
+    app.get("/v1/dev/reconcile", async (req) => {
+      const { tripId } = req.query as { tripId?: string };
+      const lines = await sql.query<{
+        debit_account: string;
+        credit_account: string;
+        amount_paise: number;
+      }>("SELECT debit_account, credit_account, amount_paise FROM journal_entries WHERE trip_id=$1", [tripId]);
+      const net: Record<string, number> = {};
+      for (const l of lines.rows) {
+        net[l.debit_account] = (net[l.debit_account] ?? 0) - l.amount_paise;
+        net[l.credit_account] = (net[l.credit_account] ?? 0) + l.amount_paise;
+      }
+      const platformNet = Object.values(net).reduce((s, v) => s + v, 0);
+      return { balanced: Math.abs(platformNet) === 0 && lines.rowCount >= 2, lines: lines.rowCount, accounts: net };
+    });
     app.get("/v1/dev/requests", async () => {
       const r = await sql.query("SELECT id, state, mode FROM ride_requests");
       return { rows: r.rows };
@@ -763,11 +815,11 @@ export async function startServer(listenPort = PORT): Promise<{
       return { tripId: t.rows[0]?.id ?? null };
     });
   }
+
   // ---- ratings, history, driver summary (consumed by the web consoles) ----
 
   app.post("/v1/trips/:id/rate", async (req) => {
-    const sess = await session(req);
-    if (!sess) fail(401, "UNAUTHORIZED", "sign in");
+    const sess = requireAuth(await session(req));
     const { id } = req.params as { id: string };
     const { stars, comment } = req.body as { stars?: number; comment?: string };
     if (!stars || stars < 1 || stars > 5) fail(400, "BAD_STARS", "stars 1..5 required");
@@ -787,8 +839,7 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/driver/status", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const body = req.body as { online?: boolean; vehicleClass?: string; lat?: number; lng?: number };
     if (typeof body.online === "boolean") {
       await sql.query("UPDATE driver_profiles SET online=$2 WHERE user_id=$1", [sess.userId, body.online]);
@@ -811,13 +862,15 @@ export async function startServer(listenPort = PORT): Promise<{
     ).rows[0];
     return { profile: updated };
   });
+
   app.post("/v1/trips/:id/cancel-driver", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     try {
       const trip = await transitionTrip(sql, id, "CANCELLED_DRIVER");
       releaseClaim(trip.request_id);
+      const live = getLiveDriver(sess.userId);
+      if (live) live.onTrip = false;
       pushRider(trip.rider_id, { t: "trip.state", state: "CANCELLED_DRIVER" });
       return { state: trip.state };
     } catch (err) {
@@ -827,8 +880,7 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.get("/v1/trips", async (req) => {
-    const sess = await session(req);
-    if (!sess) fail(401, "UNAUTHORIZED", "sign in");
+    const sess = requireAuth(await session(req));
     const col = sess.role === "RIDER" ? "rider_id" : "driver_id";
     const rows = await sql.query<TripRow & Record<string, unknown>>(
       `SELECT * FROM trips WHERE ${col}=$1 ORDER BY id DESC LIMIT 50`,
@@ -838,8 +890,7 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.get("/v1/driver/me", async (req) => {
-    const sess = await session(req);
-    if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
+    const sess = requireDriver(await session(req));
     const profile = (
       await sql.query<{ vehicle_class: string; plate: string; kyc_status: string; online: boolean }>(
         "SELECT vehicle_class, plate, kyc_status, online FROM driver_profiles WHERE user_id=$1",
@@ -854,31 +905,14 @@ export async function startServer(listenPort = PORT): Promise<{
     return { profile: profile ?? null, walletBalancePaise: balance, completedTrips: Number(completed.rows[0]?.n ?? 0) };
   });
 
-  // ---- dev verification endpoints (never in production) ----
-  if (process.env.NODE_ENV !== "production") {
-    app.get("/v1/dev/reconcile", async (req) => {
-      const { tripId } = req.query as { tripId?: string };
-      const lines = await sql.query<{
-        debit_account: string;
-        credit_account: string;
-        amount_paise: number;
-      }>("SELECT debit_account, credit_account, amount_paise FROM journal_entries WHERE trip_id=$1", [tripId]);
-      const net: Record<string, number> = {};
-      for (const l of lines.rows) {
-        net[l.debit_account] = (net[l.debit_account] ?? 0) - l.amount_paise;
-        net[l.credit_account] = (net[l.credit_account] ?? 0) + l.amount_paise;
-      }
-  const platformNet = Object.values(net).reduce((s, v) => s + v, 0);
-  return { balanced: Math.abs(platformNet) === 0 && lines.rowCount >= 2, lines: lines.rowCount, accounts: net };
-    });
-  }
-
-  app.setErrorHandler((err: unknown, _req, reply) => {
+  app.setErrorHandler((err: unknown, req, reply) => {
     const errObj = typeof err === "object" && err !== null ? err : {};
     const status = "statusCode" in errObj && typeof errObj.statusCode === "number" ? errObj.statusCode : 500;
     const code = "code" in errObj && typeof errObj.code === "string" ? errObj.code : "INTERNAL";
-    if (status >= 500) console.error("[500]", err);
     const message = err instanceof Error ? err.message : "internal error";
+    if (status >= 500) {
+      logger.error("500", `${req.method} ${req.url} -> ${status} [${code}] ${message}`, err);
+    }
     reply.status(status).send({ code, message });
   });
 
@@ -887,7 +921,6 @@ export async function startServer(listenPort = PORT): Promise<{
       const expired = await sweepExpiredNegotiations(sql);
       for (const exp of expired) {
         releaseClaim(exp.requestId);
-        void cancelBroadcast(exp.requestId); // clear dead offer cards on driver consoles
         pushRider(exp.riderId, {
           t: "request.updated",
           session: {
@@ -916,6 +949,7 @@ export async function startServer(listenPort = PORT): Promise<{
     },
   };
 }
+
 const isMain = process.argv.some((arg) => arg.replace(/\\/g, "/").endsWith("server.ts") || arg.replace(/\\/g, "/").endsWith("server.js"));
 if (isMain) {
   startServer().catch((err: unknown) => {

@@ -127,7 +127,12 @@ export default function CounterModal({
             </button>
           </>
         ) : (
-          <p className="muted">This counter expired. You'll keep matching at your original offer.</p>
+          <div>
+            <p className="muted" style={{ margin: "12px 0" }}>This counter expired. Your original offer is still broadcasting.</p>
+            <button className="btn-ghost" style={{ width: "100%" }} onClick={onClose}>
+              Dismiss
+            </button>
+          </div>
         )}
       </div>
     </div>

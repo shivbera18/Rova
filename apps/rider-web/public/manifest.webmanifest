@@ -1,0 +1,10 @@
+{
+  "name": "Chalo-X Rider",
+  "short_name": "Chalo-X",
+  "description": "Name your ride price and travel safely.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fdf6e3",
+  "theme_color": "#ffd93d",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

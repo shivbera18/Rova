@@ -596,3 +596,9 @@ h3 {
   .driver-onboarding { align-items: start; padding: 12px; }
   .onboarding-card { margin-bottom: 20px; }
 }
+
+:focus-visible { outline: 4px solid #7c3aed !important; outline-offset: 3px; }
+button, a, input, select { min-height: 44px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

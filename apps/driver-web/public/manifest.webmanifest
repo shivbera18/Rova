@@ -1,0 +1,10 @@
+{
+  "name": "Chalo-X Driver",
+  "short_name": "CX Driver",
+  "description": "Receive ride offers and manage driver earnings.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fdf6e3",
+  "theme_color": "#ffd93d",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

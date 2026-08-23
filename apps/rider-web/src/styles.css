@@ -800,3 +800,9 @@ h3 {
 
 .radix-safety-content { position: fixed; z-index: 2100; top: 50%; left: 50%; transform: translate(-50%,-50%); }
 .trusted-contact .step-label, .safety-tips > strong { display: flex; align-items: center; gap: 6px; }
+
+:focus-visible { outline: 4px solid #7c3aed !important; outline-offset: 3px; }
+button, a, input, select { min-height: 44px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

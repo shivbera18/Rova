@@ -147,9 +147,9 @@ export function OfferCard({
           <div className="num">{offer.tripKm} km</div>
           <div className="lbl">Trip Dist</div>
         </div>
-        <div className="stat-box">
-          <div className="num">₹{Math.round((offer.takeHomePaise / 100) / Math.max(offer.tripKm, 0.5))}</div>
-          <div className="lbl">Rate / km</div>
+        <div className={`stat-box ${offer.takeHomePaise === 0 ? "zero-offer" : ""}`}>
+          <div className="num">{offer.takeHomePaise === 0 ? "Free ride" : `₹${Math.round((offer.takeHomePaise / 100) / Math.max(offer.tripKm, 0.5))}`}</div>
+          <div className="lbl">{offer.takeHomePaise === 0 ? "Rider's offer" : "Rate / km"}</div>
         </div>
       </div>
 

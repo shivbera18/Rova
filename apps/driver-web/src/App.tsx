@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { formatINR, paisa, type LatLon } from "@chalo/protocol";
-import { connectDriverSocket, getToken, api, type DriverSocket, type Offer } from "./api";
+import { clearToken, connectDriverSocket, getToken, api, type DriverSocket, type Offer } from "./api";
 import { Login, DriverLanding } from "./Login";
 import { MapView, type MapStops } from "./MapView";
 import { OfferCard, unlockOfferAudio, type OfferEntry } from "./OfferCard";
@@ -220,6 +220,17 @@ function Console() {
           </button>
         )}
 
+        <button
+          className="brut-btn brut-btn-white"
+          style={{ padding: "8px 12px", fontSize: 11 }}
+          onClick={() => {
+            clearToken();
+            localStorage.removeItem(TRIP_KEY);
+            window.dispatchEvent(new Event("storage"));
+          }}
+        >
+          Log out
+        </button>
         <button className="brut-btn brut-btn-white" style={{ padding: "8px 14px", fontSize: 12 }} onClick={() => setDrawerOpen(true)}>
           {me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}
         </button>

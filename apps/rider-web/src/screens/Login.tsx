@@ -199,8 +199,10 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
           <button
             type="button"
             className="brut-btn brut-btn-white brut-btn-full"
-            style={{ marginTop: 14, fontSize: 12.5 }}
-            onClick={() => navigate("/")}
+            onClick={() => {
+              localStorage.removeItem("chalox.rider.seenLanding");
+              window.location.assign("/");
+            }}
           >
             ← Back to home
           </button>

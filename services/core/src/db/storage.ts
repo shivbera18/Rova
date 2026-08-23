@@ -28,7 +28,14 @@ export interface Storage {
 export async function openStorage(): Promise<Storage> {
   const databaseUrl = process.env.DATABASE_URL;
   if (databaseUrl) {
-    const pool = new Pool({ connectionString: databaseUrl, max: 10 });
+    // Remote hosts (e.g. Neon) require TLS; local docker postgres runs plaintext.
+    const hostname = new URL(databaseUrl).hostname;
+    const isLocal = /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/.test(hostname);
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      max: 10,
+      ...(isLocal ? {} : { ssl: { rejectUnauthorized: false } }),
+    });
     return {
       kind: "pg",
       sql: {

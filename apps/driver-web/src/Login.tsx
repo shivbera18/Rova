@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, setToken } from "./api";
+import { NeoButton, NeoCard, NeoBadge, NeoInput } from "./NeoComponents";
 
 type Mode = "OTP" | "PASSWORD";
 type Step = "PHONE" | "OTP";
@@ -46,25 +47,23 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
 
   return (
     <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative", background: "var(--paper)" }}>
-      <div className="brut-card" style={{ width: "100%", maxWidth: 420, padding: 32, zIndex: 2, background: "#ffffff" }}>
+      <NeoCard elevation="lg" style={{ width: "100%", maxWidth: 420, padding: 32, zIndex: 2, background: "#ffffff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
           <span style={{ fontSize: 28 }}>🛵</span>
           <div>
             <h1 style={{ fontSize: 24, textTransform: "uppercase" }}>Driver Partner</h1>
-            <span className="brut-badge brut-badge-green">100% FARE TAKE-HOME</span>
+            <NeoBadge variant="green">100% FARE TAKE-HOME</NeoBadge>
           </div>
         </div>
 
         <p style={{ color: "var(--ink-soft)", fontWeight: 500, fontSize: 13.5, marginBottom: 20 }}>
-          {mode === "PASSWORD"
-            ? "Sign in with your phone and account password"
-            : step === "PHONE"
+          {step === "PHONE"
             ? "Enter your phone number to receive an instant verification code"
             : `Enter 6-digit OTP sent to ${phone}`}
         </p>
 
         {err && (
-          <div className="brut-badge brut-badge-red" style={{ width: "100%", padding: "8px 12px", marginBottom: 16, textTransform: "none", fontSize: 13 }}>
+          <div className="error-text" style={{ marginBottom: 16 }}>
             ⚠️ {err}
           </div>
         )}
@@ -72,12 +71,24 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
         <form onSubmit={submit} noValidate>
           {step === "PHONE" && (
             <>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
+              <label
+                htmlFor="vehicle-type"
+                style={{
+                  display: "block",
+                  marginBottom: 6,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  color: "var(--ink)",
+                }}
+              >
                 Vehicle Type
               </label>
               <select
-                className="brut-input"
-                style={{ marginBottom: 16, cursor: "pointer" }}
+                id="vehicle-type"
+                className="brut-select"
+                style={{ marginBottom: 14, cursor: "pointer" }}
                 value={vehicleClass}
                 onChange={(e) => setVehicleClass(e.target.value)}
               >
@@ -87,16 +98,12 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
                 <option value="CAB_PRIME">🚘 Prime Sedan</option>
               </select>
 
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
-                Phone Number
-              </label>
-              <input
-                className="brut-input"
+              <NeoInput
+                label="Phone Number"
                 type="tel"
                 placeholder="+91..."
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                style={{ marginBottom: 16 }}
                 autoFocus
               />
             </>
@@ -104,59 +111,53 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
 
           {step === "OTP" && (
             <>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
-                Verification OTP
-              </label>
-              <input
-                className="brut-input"
+              <NeoInput
+                label="Verification OTP"
                 type="text"
                 placeholder="123456"
                 value={otp}
                 onChange={(e) => setOtp(e.target.value)}
-                style={{ marginBottom: 16 }}
                 autoFocus
               />
 
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
-                Set Password (Optional)
-              </label>
-              <input
-                className="brut-input"
+              <NeoInput
+                label="Set Password (Optional)"
                 type="password"
                 placeholder="Optional login password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                style={{ marginBottom: 16 }}
               />
             </>
           )}
 
-          <button className="brut-btn brut-btn-primary brut-btn-full" type="submit" disabled={busy}>
+          <NeoButton variant="primary" fullWidth type="submit" disabled={busy}>
             {busy ? "Authenticating..." : step === "PHONE" ? "Get Login Code →" : "Verify & Launch Radar 🚀"}
-          </button>
+          </NeoButton>
 
           {step === "OTP" && (
-            <button
+            <NeoButton
+              variant="white"
+              fullWidth
               type="button"
-              className="brut-btn brut-btn-white brut-btn-full"
               style={{ marginTop: 10, fontSize: 12.5 }}
               disabled={busy}
               onClick={() => setStep("PHONE")}
             >
               ← Use a different number
-            </button>
+            </NeoButton>
           )}
         </form>
 
-        <button
+        <NeoButton
+          variant="white"
+          fullWidth
           type="button"
-          className="brut-btn brut-btn-white brut-btn-full"
           style={{ marginTop: 14, fontSize: 12.5 }}
           onClick={() => window.open("http://localhost:5173/", "_blank")}
         >
           Switch to Rider App →
-        </button>
-      </div>
+        </NeoButton>
+      </NeoCard>
     </div>
   );
 }

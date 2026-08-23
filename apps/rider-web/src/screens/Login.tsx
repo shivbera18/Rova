@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AuthSession } from "@chalo/protocol";
 import { setToken } from "../api";
 import { useNavigate } from "react-router-dom";
+import { NeoButton, NeoCard, NeoBadge, NeoInput } from "../components/NeoComponents";
 
 type Mode = "OTP" | "PASSWORD";
 type Step = "PHONE" | "OTP";
@@ -62,12 +63,12 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
 
   return (
     <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "var(--paper)" }}>
-      <div className="brut-card" style={{ width: "100%", maxWidth: 420, padding: 32, background: "#ffffff", boxShadow: "var(--shadow-lg)" }}>
+      <NeoCard elevation="lg" style={{ width: "100%", maxWidth: 420, padding: 32, background: "#ffffff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
           <span style={{ fontSize: 28 }}>🚗</span>
           <div>
             <h1 style={{ fontSize: 24, textTransform: "uppercase" }}>Rider Sign-In</h1>
-            <span className="brut-badge brut-badge-primary">NAME YOUR FARE</span>
+            <NeoBadge variant="primary">NAME YOUR FARE</NeoBadge>
           </div>
         </div>
 
@@ -85,77 +86,65 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
 
         <form onSubmit={submit} noValidate>
           {step === "PHONE" && (
-            <>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
-                Phone Number
-              </label>
-              <input
-                className="brut-input"
-                type="tel"
-                placeholder="+91..."
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                style={{ marginBottom: 16 }}
-                autoFocus
-              />
-            </>
+            <NeoInput
+              label="Phone Number"
+              type="tel"
+              placeholder="+91..."
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              autoFocus
+            />
           )}
 
           {step === "OTP" && (
             <>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
-                Verification OTP
-              </label>
-              <input
-                className="brut-input"
+              <NeoInput
+                label="Verification OTP"
                 type="text"
                 placeholder="123456"
                 value={otp}
                 onChange={(e) => setOtp(e.target.value)}
-                style={{ marginBottom: 16 }}
                 autoFocus
               />
 
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 700, fontSize: 12.5, textTransform: "uppercase" }}>
-                Set Password (Optional)
-              </label>
-              <input
-                className="brut-input"
+              <NeoInput
+                label="Set Password (Optional)"
                 type="password"
                 placeholder="Optional login password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                style={{ marginBottom: 16 }}
               />
             </>
           )}
 
-          <button className="brut-btn brut-btn-primary brut-btn-full" type="submit" disabled={busy}>
+          <NeoButton variant="primary" fullWidth type="submit" disabled={busy}>
             {busy ? "Authenticating..." : step === "PHONE" ? "Get Login Code →" : "Verify & Book Rides 🚀"}
-          </button>
+          </NeoButton>
 
           {step === "OTP" && (
-            <button
+            <NeoButton
+              variant="white"
+              fullWidth
               type="button"
-              className="brut-btn brut-btn-white brut-btn-full"
               style={{ marginTop: 10, fontSize: 12.5 }}
               disabled={busy}
               onClick={() => setStep("PHONE")}
             >
               ← Use a different number
-            </button>
+            </NeoButton>
           )}
         </form>
 
-        <button
+        <NeoButton
+          variant="white"
+          fullWidth
           type="button"
-          className="brut-btn brut-btn-white brut-btn-full"
           style={{ marginTop: 14, fontSize: 12.5 }}
           onClick={() => navigate("/")}
         >
           ← Back to Home
-        </button>
-      </div>
+        </NeoButton>
+      </NeoCard>
     </div>
   );
 }

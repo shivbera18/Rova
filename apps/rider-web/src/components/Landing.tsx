@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { NeoButton, NeoCard, NeoBadge, NeoAccordion, NeoMarquee } from "./NeoComponents";
 
 export function Landing({
   audience,
@@ -11,11 +12,62 @@ export function Landing({
 }): React.ReactElement {
   const isRider = audience === "RIDER";
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeFaq, setActiveFaq] = useState<number | null>(0);
   const [calcOffer, setCalcOffer] = useState(60);
 
   const calcPlatformFee = Math.max(5, Math.min(40, Math.round(calcOffer * 0.1)));
   const calcTotal = calcOffer + calcPlatformFee;
+
+  const FAQ_ITEMS = [
+    {
+      id: "faq-1",
+      title: "Can I really negotiate my ride price down to ₹0?",
+      content: (
+        <p>
+          Yes! Chalo-X allows riders to enter any offer amount including ₹0 during promotional periods or special deals.
+          Drivers see the exact take-home amount and choose whether to accept.
+        </p>
+      ),
+    },
+    {
+      id: "faq-2",
+      title: "How do driver payouts and commissions work?",
+      content: (
+        <p>
+          Drivers take home 100% of the agreed negotiated fare. The platform fee is billed separately to the rider and
+          visible upfront. There are no hidden commission deductions from driver earnings.
+        </p>
+      ),
+    },
+    {
+      id: "faq-3",
+      title: "What happens if no driver accepts my initial offer?",
+      content: (
+        <p>
+          If nearby drivers feel the offer is low, they can counter-bid with their own price. You can accept their
+          counter, make a final adjustment, or switch to standard instant booking.
+        </p>
+      ),
+    },
+    {
+      id: "faq-4",
+      title: "Are the vehicles and drivers verified?",
+      content: (
+        <p>
+          Yes, every driver partner goes through document verification including driving license, vehicle registration,
+          and active background checks before receiving dispatch offers.
+        </p>
+      ),
+    },
+    {
+      id: "faq-5",
+      title: "What payment methods are supported?",
+      content: (
+        <p>
+          Chalo-X supports UPI, digital wallet balance, card payments, and direct cash-to-driver handoffs.
+        </p>
+      ),
+    },
+  ];
 
   return (
     <div style={{ height: "100%", overflowY: "auto", background: "var(--paper)", display: "flex", flexDirection: "column" }}>
@@ -45,9 +97,9 @@ export function Landing({
             >
               CHALO<span className="brand-accent" style={{ display: "inline-block", background: "var(--primary)", color: "#fff", padding: "1px 6px", borderRadius: "var(--radius-xs)", border: "var(--brut-border-thin)", boxShadow: "var(--shadow-xs)", transform: "none", fontSize: 18, lineHeight: "1.2" }}>-X</span>
             </span>
-            <span className="brut-badge brut-badge-primary">
+            <NeoBadge variant="primary">
               {isRider ? "RIDER PORTAL" : "DRIVER PARTNER"}
-            </span>
+            </NeoBadge>
           </div>
 
           {/* Desktop Nav */}
@@ -65,21 +117,21 @@ export function Landing({
               FAQ
             </a>
             {onSwitchPortal && (
-              <button
-                type="button"
+              <NeoButton
+                variant="white"
+                size="sm"
                 onClick={onSwitchPortal}
-                className="brut-btn brut-btn-white brut-btn-sm"
               >
                 {isRider ? "🛵 Driver Portal" : "🚗 Rider Portal"}
-              </button>
+              </NeoButton>
             )}
-            <button
-              type="button"
+            <NeoButton
+              variant="primary"
+              size="sm"
               onClick={onGetStarted}
-              className="brut-btn brut-btn-primary brut-btn-sm"
             >
               {isRider ? "Book a Ride" : "Driver Login"}
-            </button>
+            </NeoButton>
           </div>
 
           {/* Mobile menu toggle */}
@@ -119,74 +171,41 @@ export function Landing({
               FAQ
             </a>
             {onSwitchPortal && (
-              <button
-                type="button"
+              <NeoButton
+                variant="white"
+                fullWidth
                 onClick={() => {
                   setMobileMenuOpen(false);
                   onSwitchPortal();
                 }}
-                className="brut-btn brut-btn-white brut-btn-full"
               >
                 {isRider ? "🛵 Driver Portal" : "🚗 Rider Portal"}
-              </button>
+              </NeoButton>
             )}
-            <button
-              type="button"
+            <NeoButton
+              variant="primary"
+              fullWidth
               onClick={() => {
                 setMobileMenuOpen(false);
                 onGetStarted();
               }}
-              className="brut-btn brut-btn-primary brut-btn-full"
             >
               {isRider ? "Book a Ride" : "Driver Login"}
-            </button>
+            </NeoButton>
           </div>
         )}
       </header>
 
-      {/* ============ PROMINENT MARQUEE STRIP ============ */}
-      <div
-        style={{
-          overflow: "hidden",
-          background: "var(--ink)",
-          color: "#ffffff",
-          minHeight: "44px",
-          height: "44px",
-          display: "flex",
-          alignItems: "center",
-          borderBottom: "var(--brut-border)",
-          position: "relative",
-          zIndex: 10,
-          whiteSpace: "nowrap",
-        }}
-      >
-        <div
-          className="brut-marquee-track"
-          style={{
-            fontWeight: 800,
-            textTransform: "uppercase",
-            fontSize: 13,
-            letterSpacing: "0.08em",
-            display: "inline-flex",
-            alignItems: "center",
-          }}
-        >
-          {[0, 1, 2].map((copy) => (
-            <span key={copy} style={{ display: "inline-flex", alignItems: "center", gap: 32, paddingRight: 32 }}>
-              <span style={{ color: "#ffffff" }}>⚡ You set the price</span>
-              <span style={{ color: "var(--secondary)" }}>★</span>
-              <span style={{ color: "#ffffff" }}>Transparent Platform Fee</span>
-              <span style={{ color: "var(--secondary)" }}>★</span>
-              <span style={{ color: "#ffffff" }}>Drivers keep 100% of deal</span>
-              <span style={{ color: "var(--secondary)" }}>★</span>
-              <span style={{ color: "#ffffff" }}>Bikes · Autos · Cabs</span>
-              <span style={{ color: "var(--secondary)" }}>★</span>
-              <span style={{ color: "#ffffff" }}>Zero Surge Pricing</span>
-              <span style={{ color: "var(--secondary)" }}>★</span>
-            </span>
-          ))}
-        </div>
-      </div>
+      {/* ============ PRE-BUILT NEOMARQUEE ============ */}
+      <NeoMarquee
+        items={[
+          "⚡ You set the price",
+          "Transparent Platform Fee",
+          "Drivers keep 100% of deal",
+          "Bikes · Autos · Cabs",
+          "Zero Surge Pricing",
+        ]}
+      />
 
       {/* ============ HERO SECTION ============ */}
       <section
@@ -203,12 +222,9 @@ export function Landing({
         }}
       >
         <div style={{ flex: "1 1 480px", maxWidth: 640 }}>
-          <span
-            className="brut-badge brut-badge-primary"
-            style={{ marginBottom: 18, display: "inline-flex" }}
-          >
+          <NeoBadge variant="primary" style={{ marginBottom: 18, display: "inline-flex" }}>
             ✨ India's Open Fair-Price Ride Marketplace
-          </span>
+          </NeoBadge>
 
           <h1 style={{ fontSize: "clamp(38px, 5.5vw, 64px)", lineHeight: 1.05, margin: "14px 0 20px" }}>
             You Name <br />
@@ -234,14 +250,14 @@ export function Landing({
           </p>
 
           <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
-            <button
-              type="button"
+            <NeoButton
+              variant="primary"
+              size="lg"
               onClick={onGetStarted}
-              className="brut-btn brut-btn-primary"
-              style={{ fontSize: 15, padding: "13px 26px", boxShadow: "var(--shadow-md)" }}
+              style={{ boxShadow: "var(--shadow-md)" }}
             >
               🚀 Book Your Ride Now
-            </button>
+            </NeoButton>
             <a
               href="#calculator"
               className="brut-btn brut-btn-white"
@@ -252,33 +268,22 @@ export function Landing({
           </div>
 
           <div className="row" style={{ gap: 8, marginTop: 32, flexWrap: "wrap" }}>
-            <span className="brut-badge">🏍️ Bike Quick Rides</span>
-            <span className="brut-badge">🛺 Auto Rickshaws</span>
-            <span className="brut-badge">🚗 Prime Cabs</span>
-            <span className="brut-badge">🛡️ Start OTP Verified</span>
+            <NeoBadge>🏍️ Bike Quick Rides</NeoBadge>
+            <NeoBadge>🛺 Auto Rickshaws</NeoBadge>
+            <NeoBadge>🚗 Prime Cabs</NeoBadge>
+            <NeoBadge variant="green">🛡️ Start OTP Verified</NeoBadge>
           </div>
         </div>
 
-        {/* Hero Visual Card */}
+        {/* Hero Visual NeoCard */}
         <div style={{ flex: "0 1 360px", width: "100%", margin: "0 auto" }}>
-          <div
-            className="brut-card"
-            style={{
-              padding: 24,
-              boxShadow: "var(--shadow-lg)",
-              background: "#ffffff",
-              borderRadius: "var(--radius-lg)",
-            }}
-          >
+          <NeoCard elevation="lg" style={{ padding: 24, borderRadius: "var(--radius-lg)" }}>
             <div className="spread" style={{ marginBottom: 14 }}>
-              <span className="brut-badge brut-badge-green">● LIVE TRIP BIDDING</span>
+              <NeoBadge variant="green">● LIVE TRIP BIDDING</NeoBadge>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-muted)" }}>BENGALURU</span>
             </div>
 
-            <div
-              className="brut-card brut-card-primary"
-              style={{ padding: 16, marginBottom: 14 }}
-            >
+            <NeoCard variant="primary" elevation="none" style={{ padding: 16, marginBottom: 14 }}>
               <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 Rider's Offer
               </div>
@@ -288,13 +293,13 @@ export function Landing({
               <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
                 Route: Koramangala ➔ Indiranagar · 4.8 km
               </div>
-            </div>
+            </NeoCard>
 
             <div className="col" style={{ gap: 8 }}>
               {[
-                { type: "🏍️ Bike Taxi", eta: "3 min away", bid: "₹65 (Accepted)", badge: "brut-badge-green" },
-                { type: "🛺 Auto Meter", eta: "5 min away", bid: "Counter: ₹75", badge: "brut-badge-primary" },
-                { type: "🚗 Prime Cab", eta: "6 min away", bid: "Counter: ₹90", badge: "brut-badge-primary" },
+                { type: "🏍️ Bike Taxi", eta: "3 min away", bid: "₹65 (Accepted)", badgeVariant: "green" as const },
+                { type: "🛺 Auto Meter", eta: "5 min away", bid: "Counter: ₹75", badgeVariant: "primary" as const },
+                { type: "🚗 Prime Cab", eta: "6 min away", bid: "Counter: ₹90", badgeVariant: "primary" as const },
               ].map((item) => (
                 <div
                   key={item.type}
@@ -310,22 +315,22 @@ export function Landing({
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{item.type}</div>
                     <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>{item.eta}</div>
                   </div>
-                  <span className={`brut-badge ${item.badge}`} style={{ fontSize: 10.5 }}>
+                  <NeoBadge variant={item.badgeVariant} style={{ fontSize: 10.5 }}>
                     {item.bid}
-                  </span>
+                  </NeoBadge>
                 </div>
               ))}
             </div>
 
-            <button
-              type="button"
+            <NeoButton
+              variant="primary"
+              fullWidth
               onClick={onGetStarted}
-              className="brut-btn brut-btn-primary brut-btn-full"
               style={{ marginTop: 18 }}
             >
               Try Negotiation Flow →
-            </button>
-          </div>
+            </NeoButton>
+          </NeoCard>
         </div>
       </section>
 
@@ -358,7 +363,7 @@ export function Landing({
       {/* ============ HOW IT WORKS ============ */}
       <section id="how" style={{ padding: "64px 24px", maxWidth: 1100, margin: "0 auto", width: "100%" }}>
         <div style={{ textAlign: "center", marginBottom: 44 }}>
-          <span className="brut-badge brut-badge-primary" style={{ marginBottom: 10 }}>SIMPLE PRINCIPLES</span>
+          <NeoBadge variant="primary" style={{ marginBottom: 10 }}>SIMPLE PRINCIPLES</NeoBadge>
           <h2 style={{ fontSize: "clamp(28px, 4vw, 42px)" }}>How Chalo-X Works</h2>
           <p style={{ color: "var(--ink-soft)", fontWeight: 500, marginTop: 8, fontSize: 16 }}>
             No black-box algorithms. No mystery commissions. Direct peer-to-peer ride dispatch.
@@ -392,9 +397,9 @@ export function Landing({
               badge: "SECURE SAFETY",
             },
           ].map((card) => (
-            <div
+            <NeoCard
               key={card.step}
-              className="brut-card"
+              elevation="sm"
               style={{
                 padding: 24,
                 position: "relative",
@@ -408,12 +413,12 @@ export function Landing({
                   <span style={{ fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 900, color: "var(--primary)" }}>
                     {card.step}
                   </span>
-                  <span className="brut-badge brut-badge-primary">{card.badge}</span>
+                  <NeoBadge variant="primary">{card.badge}</NeoBadge>
                 </div>
                 <h3 style={{ fontSize: 18, marginBottom: 10 }}>{card.title}</h3>
                 <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>{card.desc}</p>
               </div>
-            </div>
+            </NeoCard>
           ))}
         </div>
       </section>
@@ -422,15 +427,16 @@ export function Landing({
       <section id="calculator" style={{ background: "#ffffff", borderTop: "var(--brut-border)", borderBottom: "var(--brut-border)", padding: "64px 24px" }}>
         <div style={{ maxWidth: 1000, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: 36 }}>
-            <span className="brut-badge brut-badge-green" style={{ marginBottom: 10 }}>TRANSPARENT BREAKDOWN</span>
+            <NeoBadge variant="green" style={{ marginBottom: 10 }}>TRANSPARENT BREAKDOWN</NeoBadge>
             <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)" }}>Interactive Fair Fare Calculator</h2>
             <p style={{ color: "var(--ink-soft)", fontWeight: 500, marginTop: 6, fontSize: 15 }}>
               Drag the slider to see exactly how your money splits between the driver and Chalo-X.
             </p>
           </div>
 
-          <div
-            className="brut-card brut-card-primary"
+          <NeoCard
+            variant="primary"
+            elevation="md"
             style={{
               padding: "32px 24px",
               maxWidth: 680,
@@ -465,21 +471,21 @@ export function Landing({
             />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-              <div className="brut-card" style={{ padding: 16, background: "#ffffff" }}>
+              <NeoCard elevation="none" style={{ padding: 16 }}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: "var(--green)", textTransform: "uppercase" }}>Driver Earns (100%)</div>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 900, marginTop: 4 }}>
                   ₹{calcOffer}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--ink-muted)", marginTop: 2 }}>Direct to driver wallet</div>
-              </div>
+              </NeoCard>
 
-              <div className="brut-card" style={{ padding: 16, background: "#ffffff" }}>
+              <NeoCard elevation="none" style={{ padding: 16 }}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: "var(--primary)", textTransform: "uppercase" }}>Platform Fee</div>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 900, marginTop: 4 }}>
                   ₹{calcPlatformFee}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--ink-muted)", marginTop: 2 }}>Servers, safety & dispatch</div>
-              </div>
+              </NeoCard>
             </div>
 
             <div className="spread" style={{ padding: "12px 16px", background: "var(--ink)", color: "#ffffff", borderRadius: "var(--radius-sm)" }}>
@@ -491,14 +497,14 @@ export function Landing({
                 ₹{calcTotal}
               </div>
             </div>
-          </div>
+          </NeoCard>
         </div>
       </section>
 
       {/* ============ VEHICLE SELECTION SUITE ============ */}
       <section style={{ padding: "64px 24px", maxWidth: 1100, margin: "0 auto", width: "100%" }}>
         <div style={{ textAlign: "center", marginBottom: 40 }}>
-          <span className="brut-badge brut-badge-primary" style={{ marginBottom: 10 }}>FLEET OPTIONS</span>
+          <NeoBadge variant="primary" style={{ marginBottom: 10 }}>FLEET OPTIONS</NeoBadge>
           <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)" }}>Ride Options for Every Journey</h2>
           <p style={{ color: "var(--ink-soft)", fontWeight: 500, marginTop: 6, fontSize: 15 }}>
             From quick solo commutes to comfortable family sedans.
@@ -536,15 +542,15 @@ export function Landing({
               tag: "PREMIUM",
             },
           ].map((v) => (
-            <div key={v.name} className="brut-card" style={{ padding: 22 }}>
+            <NeoCard key={v.name} elevation="sm" style={{ padding: 22 }}>
               <div className="spread" style={{ marginBottom: 14 }}>
                 <span style={{ fontSize: 32 }}>{v.icon}</span>
-                <span className="brut-badge brut-badge-primary">{v.tag}</span>
+                <NeoBadge variant="primary">{v.tag}</NeoBadge>
               </div>
               <h3 style={{ fontSize: 18, marginBottom: 4 }}>{v.name}</h3>
               <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)", marginBottom: 10 }}>{v.capacity}</div>
               <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5 }}>{v.desc}</p>
-            </div>
+            </NeoCard>
           ))}
         </div>
       </section>
@@ -553,7 +559,7 @@ export function Landing({
       <section id="safety" style={{ background: "#ffffff", borderTop: "var(--brut-border)", borderBottom: "var(--brut-border)", padding: "64px 24px" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: 40 }}>
-            <span className="brut-badge brut-badge-green" style={{ marginBottom: 10 }}>SAFETY FIRST</span>
+            <NeoBadge variant="green" style={{ marginBottom: 10 }}>SAFETY FIRST</NeoBadge>
             <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)" }}>Engineered for Total Ride Security</h2>
             <p style={{ color: "var(--ink-soft)", fontWeight: 500, marginTop: 6, fontSize: 15 }}>
               Security features built right into the core dispatch architecture.
@@ -561,99 +567,55 @@ export function Landing({
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24 }}>
-            <div className="brut-card" style={{ padding: 26 }}>
+            <NeoCard elevation="sm" style={{ padding: 26 }}>
               <div style={{ fontSize: 28, marginBottom: 12 }}>🔐</div>
               <h3 style={{ fontSize: 19, marginBottom: 8 }}>Cryptographic Start OTP</h3>
               <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>
                 Every ride generates a unique salted PIN. The driver cannot start the meter until the OTP is verified by the core dispatch server.
               </p>
-            </div>
+            </NeoCard>
 
-            <div className="brut-card" style={{ padding: 26 }}>
+            <NeoCard elevation="sm" style={{ padding: 26 }}>
               <div style={{ fontSize: 28, marginBottom: 12 }}>📍</div>
               <h3 style={{ fontSize: 19, marginBottom: 8 }}>Live Telemetry & GPS Tracking</h3>
               <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>
                 Real-time driver location stream with anti-teleport checks and automated route anomaly detection throughout the journey.
               </p>
-            </div>
+            </NeoCard>
 
-            <div className="brut-card" style={{ padding: 26 }}>
+            <NeoCard elevation="sm" style={{ padding: 26 }}>
               <div style={{ fontSize: 28, marginBottom: 12 }}>🛡️</div>
               <h3 style={{ fontSize: 19, marginBottom: 8 }}>Verified Partner KYC</h3>
               <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>
                 All drivers register with validated driving licenses, vehicle registration plates, and KYC status approvals before going online.
               </p>
-            </div>
+            </NeoCard>
           </div>
         </div>
       </section>
 
-      {/* ============ FAQ SECTION ============ */}
+      {/* ============ PRE-BUILT NEOACCORDION FAQ ============ */}
       <section id="faq" style={{ padding: "64px 24px", maxWidth: 860, margin: "0 auto", width: "100%" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <span className="brut-badge brut-badge-primary" style={{ marginBottom: 10 }}>QUESTIONS & ANSWERS</span>
+          <NeoBadge variant="primary" style={{ marginBottom: 10 }}>QUESTIONS & ANSWERS</NeoBadge>
           <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)" }}>Frequently Asked Questions</h2>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {[
-            {
-              q: "Can I really negotiate my ride price down to ₹0?",
-              a: "Yes! Chalo-X allows riders to enter any offer amount including ₹0 during promotional periods or special deals. Drivers see the exact take-home amount and choose whether to accept.",
-            },
-            {
-              q: "How do driver payouts and commissions work?",
-              a: "Drivers take home 100% of the agreed negotiated fare. The platform fee is billed separately to the rider and visible upfront. There are no hidden commission deductions from driver earnings.",
-            },
-            {
-              q: "What happens if no driver accepts my initial offer?",
-              a: "If nearby drivers feel the offer is low, they can counter-bid with their own price. You can accept their counter, make a final adjustment, or switch to standard instant booking.",
-            },
-            {
-              q: "Are the vehicles and drivers verified?",
-              a: "Yes, every driver partner goes through document verification including driving license, vehicle registration, and active background checks before receiving dispatch offers.",
-            },
-            {
-              q: "What payment methods are supported?",
-              a: "Chalo-X supports UPI, digital wallet balance, card payments, and direct cash-to-driver handoffs.",
-            },
-          ].map((item, idx) => (
-            <div
-              key={item.q}
-              className="brut-card"
-              style={{
-                padding: "18px 22px",
-                cursor: "pointer",
-                background: activeFaq === idx ? "var(--primary-soft)" : "#ffffff",
-              }}
-              onClick={() => setActiveFaq(activeFaq === idx ? null : idx)}
-            >
-              <div className="spread">
-                <span style={{ fontWeight: 800, fontSize: 15, color: "var(--ink)" }}>{item.q}</span>
-                <span style={{ fontSize: 18, fontWeight: 900, color: "var(--primary)" }}>{activeFaq === idx ? "−" : "+"}</span>
-              </div>
-              {activeFaq === idx && (
-                <p style={{ marginTop: 12, fontSize: 14, color: "var(--ink-soft)", lineHeight: 1.6 }}>
-                  {item.a}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
+        <NeoAccordion items={FAQ_ITEMS} defaultExpandedId="faq-1" />
       </section>
 
       {/* ============ FINAL CTA BANNER ============ */}
       <section style={{ padding: "0 24px 64px", maxWidth: 1100, margin: "0 auto", width: "100%" }}>
-        <div
-          className="brut-card brut-card-dark"
+        <NeoCard
+          variant="dark"
+          elevation="lg"
           style={{
             padding: "48px 32px",
             textAlign: "center",
             borderRadius: "var(--radius-xl)",
-            boxShadow: "var(--shadow-lg)",
           }}
         >
-          <span className="brut-badge brut-badge-green" style={{ marginBottom: 16 }}>READY TO RIDE?</span>
+          <NeoBadge variant="green" style={{ marginBottom: 16 }}>READY TO RIDE?</NeoBadge>
           <h2 style={{ fontSize: "clamp(30px, 4.5vw, 48px)", color: "#ffffff", marginBottom: 16 }}>
             Take Control of Your Commute Today.
           </h2>
@@ -661,26 +623,26 @@ export function Landing({
             Join thousands of riders and drivers in Bengaluru experiencing fair, negotiated, transparent mobility.
           </p>
           <div className="row center" style={{ gap: 14, flexWrap: "wrap" }}>
-            <button
-              type="button"
+            <NeoButton
+              variant="primary"
+              size="lg"
               onClick={onGetStarted}
-              className="brut-btn brut-btn-primary"
-              style={{ fontSize: 16, padding: "14px 32px", boxShadow: "var(--shadow-md)" }}
+              style={{ padding: "14px 32px", boxShadow: "var(--shadow-md)" }}
             >
               🚀 Book Your First Ride Now
-            </button>
+            </NeoButton>
             {onSwitchPortal && (
-              <button
-                type="button"
+              <NeoButton
+                variant="white"
+                size="lg"
                 onClick={onSwitchPortal}
-                className="brut-btn brut-btn-white"
-                style={{ fontSize: 16, padding: "14px 28px" }}
+                style={{ padding: "14px 28px" }}
               >
                 Drive & Earn 100% →
-              </button>
+              </NeoButton>
             )}
           </div>
-        </div>
+        </NeoCard>
       </section>
 
       {/* ============ FOOTER ============ */}
@@ -707,13 +669,13 @@ export function Landing({
             <a href="#calculator" className="navlink" style={{ fontSize: 12 }}>Calculator</a>
             <a href="#safety" className="navlink" style={{ fontSize: 12 }}>Safety</a>
             <a href="#faq" className="navlink" style={{ fontSize: 12 }}>FAQ</a>
-            <button
-              type="button"
+            <NeoButton
+              variant="primary"
+              size="sm"
               onClick={onGetStarted}
-              className="brut-btn brut-btn-sm brut-btn-primary"
             >
               {isRider ? "Book Now" : "Driver Portal"}
-            </button>
+            </NeoButton>
           </div>
         </div>
       </footer>

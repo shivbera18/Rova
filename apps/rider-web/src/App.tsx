@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { getToken, setToken } from "./api";
 import Login from "./screens/Login";
 import { Landing } from "./components/Landing";
 import Book from "./screens/Book";
 import History from "./screens/History";
 import { enablePushNotifications, pushSupported } from "./push";
+import { SafetyPanel } from "./components/SafetyPanel";
 
 export default function App(): React.ReactElement {
   const [token, setTok] = useState<string | null>(getToken());
@@ -14,6 +15,7 @@ export default function App(): React.ReactElement {
   const [pushState, setPushState] = useState<NotificationPermission>(
     () => (pushSupported() ? Notification.permission : "denied"),
   );
+  const [safetyOpen, setSafetyOpen] = useState(false);
 
   // Returning users skip the landing page
   useEffect(() => {
@@ -66,21 +68,25 @@ export default function App(): React.ReactElement {
                     🚗 Ride
                   </NavLink>
                   <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
-                    🧾 History
+                    🧾 Trips
                   </NavLink>
-                  {pushSupported() && pushState !== "granted" && (
-                    <button
-                      className="navlink"
-                      onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
-                    >
-                      🔔 Alerts
-                    </button>
-                  )}
+                  <button className="navlink" onClick={() => setSafetyOpen(true)}>
+                    🛡️ Safety
+                  </button>
                   <button className="navlink" onClick={logout}>
-                    Log out
+                    👤 Account
                   </button>
                 </nav>
+                {pushSupported() && pushState !== "granted" && (
+                  <button
+                    className="brut-btn brut-btn-white desktop-alert"
+                    onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
+                  >
+                    🔔 Alerts
+                  </button>
+                )}
               </header>
+              {safetyOpen && <SafetyPanel onClose={() => setSafetyOpen(false)} />}
               <main className="main-area" style={{ flex: 1, position: "relative", overflow: "hidden" }}>
                 <Routes>
                   <Route path="/history" element={<History />} />

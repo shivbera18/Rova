@@ -40,7 +40,6 @@ export function LocationSearch({
     setOpen(false);
     setResults([]);
   }, [value]);
-
   useEffect(() => {
     const trimmed = query.trim();
     if (suppressSearchRef.current) {
@@ -59,13 +58,11 @@ export function LocationSearch({
       abortRef.current = controller;
       setLoading(true);
       const params = new URLSearchParams({
-        q: `${trimmed}, Bengaluru, India`,
+        q: trimmed,
         format: "jsonv2",
         addressdetails: "1",
-        limit: "6",
+        limit: "7",
         countrycodes: "in",
-        viewbox: "77.45,13.15,77.85,12.75",
-        bounded: "0",
       });
       void fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
         signal: controller.signal,
@@ -105,7 +102,7 @@ export function LocationSearch({
   }
 
   return (
-    <div className="location-search">
+    <div className={`location-search ${kind} ${open ? "open" : ""}`}>
       <span className={`location-dot ${kind}`} aria-hidden />
       <div className="location-field">
         <label htmlFor={`${kind}-search`}>{kind === "pickup" ? "Pickup" : "Drop-off"}</label>

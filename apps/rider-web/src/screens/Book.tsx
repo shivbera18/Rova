@@ -23,6 +23,20 @@ type Phase =
   | { k: "trip"; trip: TripView }
   | { k: "done"; trip: TripView };
 
+interface StoredRoute {
+  id: string;
+  label: string;
+  pickupLabel: string;
+  dropLabel: string;
+  pickup: LatLon;
+  drop: LatLon;
+}
+
+function readRoutes(key: string): StoredRoute[] {
+  try { return JSON.parse(localStorage.getItem(key) ?? "[]") as StoredRoute[]; }
+  catch { return []; }
+}
+
 const PAY_METHODS = ["UPI", "WALLET", "CASH"] as const;
 // must match the server's offerStageTtlS so the countdown bar hits 0 at real expiry
 const MATCH_TOTAL_S = 45;
@@ -89,6 +103,8 @@ export default function Book(): React.ReactElement {
   const [tipPaise, setTipPaise] = useState(0);
   const [rated, setRated] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [savedRoutes, setSavedRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.savedRoutes"));
+  const [recentRoutes, setRecentRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.recentRoutes"));
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const routeRef = useRef<{ pickup: LatLon | null; drop: LatLon | null }>({ pickup: null, drop: null });
@@ -225,25 +241,75 @@ export default function Book(): React.ReactElement {
     }
     setDrop(ll);
     setDropLabel("Pinned drop-off location");
+    rememberRecent(pickup, ll, pickupLabel || "Pinned pickup", "Pinned drop-off");
     await loadQuotesForRoute(pickup, ll);
+  }
+
+  function rememberRecent(a: LatLon, b: LatLon, from: string, to: string): void {
+    const route: StoredRoute = {
+      id: `${a.lat},${a.lng}:${b.lat},${b.lng}`,
+      label: `${from} → ${to}`,
+      pickupLabel: from,
+      dropLabel: to,
+      pickup: a,
+      drop: b,
+    };
+    const next = [route, ...recentRoutes.filter((r) => r.id !== route.id)].slice(0, 5);
+    setRecentRoutes(next);
+    localStorage.setItem("chalox.recentRoutes", JSON.stringify(next));
+  }
+
+  function saveCurrentRoute(): void {
+    if (!pickup || !drop) return;
+    const from = pickupLabel || "Pinned pickup";
+    const to = dropLabel || "Pinned drop-off";
+    const route: StoredRoute = {
+      id: `${pickup.lat},${pickup.lng}:${drop.lat},${drop.lng}`,
+      label: `${from} → ${to}`,
+      pickupLabel: from,
+      dropLabel: to,
+      pickup,
+      drop,
+    };
+    const next = [route, ...savedRoutes.filter((r) => r.id !== route.id)].slice(0, 8);
+    setSavedRoutes(next);
+    localStorage.setItem("chalox.savedRoutes", JSON.stringify(next));
+  }
+
+  async function selectStoredRoute(route: StoredRoute): Promise<void> {
+    setPickup(route.pickup);
+    setPickupLabel(route.pickupLabel);
+    setDrop(route.drop);
+    setDropLabel(route.dropLabel);
+    rememberRecent(route.pickup, route.drop, route.pickupLabel, route.dropLabel);
+    await loadQuotesForRoute(route.pickup, route.drop);
   }
 
   async function selectSearchPlace(kind: "pickup" | "drop", place: SelectedPlace): Promise<void> {
     if (kind === "pickup") {
       setPickup(place.position);
       setPickupLabel(place.label);
-      if (drop) await loadQuotesForRoute(place.position, drop);
+      if (drop) {
+        rememberRecent(place.position, drop, place.label, dropLabel || "Drop-off");
+        await loadQuotesForRoute(place.position, drop);
+      }
       return;
     }
     setDrop(place.position);
     setDropLabel(place.label);
-    if (pickup) await loadQuotesForRoute(pickup, place.position);
+    if (pickup) {
+      rememberRecent(pickup, place.position, pickupLabel || "Pickup", place.label);
+      await loadQuotesForRoute(pickup, place.position);
+    }
   }
   async function selectPopularRoute(route: typeof POPULAR_ROUTES[0]): Promise<void> {
+    const from = route.label.split("➔")[0]?.replace("⚡", "").trim() ?? "Pickup";
+    const to = route.label.split("➔")[1]?.trim() ?? "Drop-off";
     setPickup(route.pickup);
-    setPickupLabel(route.label.split("➔")[0]?.replace("⚡", "").trim() ?? "Pickup");
+    setPickupLabel(from);
     setDrop(route.drop);
-    setDropLabel(route.label.split("➔")[1]?.trim() ?? "Drop-off");
+    setDropLabel(to);
+    rememberRecent(route.pickup, route.drop, from, to);
     await loadQuotesForRoute(route.pickup, route.drop);
   }
   function reset(): void {
@@ -277,7 +343,9 @@ export default function Book(): React.ReactElement {
 
   return (
     <div className="book-wrap">
-      <MapView pickup={pickup} drop={drop} driver={driverPos} onMapClick={(ll) => void onMapClick(ll)} />
+      <div className="map-layer">
+        <MapView pickup={pickup} drop={drop} driver={driverPos} onMapClick={(ll) => void onMapClick(ll)} />
+      </div>
 
       <div className="side-panel">
         {error && (
@@ -355,6 +423,32 @@ export default function Book(): React.ReactElement {
               ))}
             </div>
 
+            {savedRoutes.length > 0 && (
+              <>
+                <div className="booking-divider"><span>SAVED</span></div>
+                <div className="quick-places-row">
+                  {savedRoutes.map((route) => (
+                    <button key={route.id} type="button" className="saved-route saved" onClick={() => void selectStoredRoute(route)}>
+                      <span>★</span><small>{route.label}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {recentRoutes.length > 0 && (
+              <>
+                <div className="booking-divider"><span>RECENT</span></div>
+                <div className="quick-places-row">
+                  {recentRoutes.slice(0, 3).map((route) => (
+                    <button key={route.id} type="button" className="saved-route recent" onClick={() => void selectStoredRoute(route)}>
+                      <span>↻</span><small>{route.label}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
             <div className="booking-options">
               <div>
                 <span className="option-label">Payment</span>
@@ -397,6 +491,10 @@ export default function Book(): React.ReactElement {
                 </div>
               </button>
             ))}
+            <div className="quote-route-summary">
+              <span>{pickupLabel || "Pickup"}</span><b>→</b><span>{dropLabel || "Drop-off"}</span>
+              <button type="button" onClick={saveCurrentRoute}>☆ Save</button>
+            </div>
             <button className="btn-ghost" style={{ marginTop: 8, width: "100%" }} onClick={reset}>
               ← Change Route
             </button>

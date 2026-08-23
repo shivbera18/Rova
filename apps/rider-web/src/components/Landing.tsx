@@ -1,7 +1,5 @@
-/**
- * Chalo-X Landing Page — Sleek Neo-Brutalism Design.
- * Clean boundaries, modern indigo accents, crisp cards, zero harsh yellow.
- */
+import { useState } from "react";
+
 export function Landing({
   audience,
   onGetStarted,
@@ -12,14 +10,14 @@ export function Landing({
   onSwitchPortal?: () => void;
 }): React.ReactElement {
   const isRider = audience === "RIDER";
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
     <div style={{ height: "100%", overflowY: "auto", background: "var(--paper)", display: "flex", flexDirection: "column" }}>
-      {/* ============ NAVBAR ============ */}
-      <nav
-        className="spread"
+      {/* ============ TOPBAR ============ */}
+      <header
         style={{
-          padding: "16px 32px",
+          padding: "12px 20px",
           background: "#ffffff",
           borderBottom: "var(--brut-border)",
           position: "sticky",
@@ -27,89 +25,145 @@ export function Landing({
           zIndex: 100,
         }}
       >
-        <div className="row" style={{ gap: 12 }}>
-          <span
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 22,
-              fontWeight: 900,
-              letterSpacing: "-0.03em",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            CHALO<span className="brand-accent" style={{ background: "var(--primary)", color: "#fff", padding: "1px 6px", borderRadius: "var(--radius-xs)", border: "var(--brut-border-thin)", boxShadow: "var(--shadow-xs)" }}>-X</span>
-          </span>
-          <span className="brut-badge brut-badge-primary">
-            {isRider ? "RIDER" : "DRIVER"}
-          </span>
-        </div>
+        <div className="spread" style={{ maxWidth: 1200, margin: "0 auto", width: "100%" }}>
+          <div className="row" style={{ gap: 10 }}>
+            <span
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 22,
+                fontWeight: 900,
+                letterSpacing: "-0.03em",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 2,
+              }}
+            >
+              CHALO<span className="brand-accent" style={{ display: "inline-block", background: "var(--primary)", color: "#fff", padding: "1px 6px", borderRadius: "var(--radius-xs)", border: "var(--brut-border-thin)", boxShadow: "var(--shadow-xs)", transform: "none", fontSize: 18, lineHeight: "1.2" }}>-X</span>
+            </span>
+            <span className="brut-badge brut-badge-primary">
+              {isRider ? "RIDER" : "DRIVER"}
+            </span>
+          </div>
 
-        <div className="row" style={{ gap: 12 }}>
-          <a
-            href="#how"
-            className="brut-btn brut-btn-white"
-            style={{ padding: "8px 16px", fontSize: 13, boxShadow: "none" }}
-          >
-            How it works
-          </a>
-          {onSwitchPortal && (
+          {/* Desktop Nav */}
+          <div className="row desktop-nav" style={{ gap: 10 }}>
+            <a
+              href="#how"
+              className="brut-btn brut-btn-white brut-btn-sm"
+              style={{ boxShadow: "none" }}
+            >
+              How it works
+            </a>
+            {onSwitchPortal && (
+              <button
+                type="button"
+                onClick={onSwitchPortal}
+                className="brut-btn brut-btn-white brut-btn-sm"
+              >
+                {isRider ? "🛵 Driver Portal" : "🚗 Rider Portal"}
+              </button>
+            )}
             <button
               type="button"
-              onClick={onSwitchPortal}
-              className="brut-btn brut-btn-white"
-              style={{ padding: "8px 16px", fontSize: 13 }}
+              onClick={onGetStarted}
+              className="brut-btn brut-btn-primary brut-btn-sm"
             >
-              {isRider ? "🛵 Driver Portal" : "🚗 Rider Portal"}
+              {isRider ? "Book a Ride" : "Driver Login"}
             </button>
-          )}
+          </div>
+
+          {/* Mobile menu toggle */}
           <button
             type="button"
-            onClick={onGetStarted}
-            className="brut-btn brut-btn-primary"
-            style={{ padding: "8px 20px", fontSize: 13 }}
+            className="brut-btn brut-btn-white brut-btn-sm mobile-only"
+            onClick={() => setMobileMenuOpen((prev) => !prev)}
+            aria-label="Toggle menu"
           >
-            {isRider ? "Book a Ride" : "Driver Login"}
+            {mobileMenuOpen ? "✕" : "☰"}
           </button>
         </div>
-      </nav>
 
-      {/* ============ MARQUEE STRIP ============ */}
+        {/* Mobile Dropdown */}
+        {mobileMenuOpen && (
+          <div
+            className="mobile-only"
+            style={{
+              paddingTop: 12,
+              marginTop: 12,
+              borderTop: "var(--brut-border-thin)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <a
+              href="#how"
+              className="brut-btn brut-btn-white brut-btn-full"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              How it works
+            </a>
+            {onSwitchPortal && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onSwitchPortal();
+                }}
+                className="brut-btn brut-btn-white brut-btn-full"
+              >
+                {isRider ? "🛵 Driver Portal" : "🚗 Rider Portal"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onGetStarted();
+              }}
+              className="brut-btn brut-btn-primary brut-btn-full"
+            >
+              {isRider ? "Book a Ride" : "Driver Login"}
+            </button>
+          </div>
+        )}
+      </header>
+
+      {/* ============ PROMINENT MARQUEE STRIP ============ */}
       <div
         style={{
           overflow: "hidden",
           background: "var(--ink)",
           color: "#ffffff",
-          padding: "10px 0",
+          padding: "12px 0",
           borderBottom: "var(--brut-border)",
+          position: "relative",
+          zIndex: 10,
+          whiteSpace: "nowrap",
         }}
       >
         <div
+          className="brut-marquee-track"
           style={{
-            display: "flex",
-            width: "max-content",
-            animation: "brut-marquee 22s linear infinite",
-            gap: 40,
-            fontWeight: 700,
+            fontWeight: 800,
             textTransform: "uppercase",
-            fontSize: 12.5,
+            fontSize: 13,
             letterSpacing: "0.08em",
-            whiteSpace: "nowrap",
+            display: "inline-flex",
           }}
         >
-          {[0, 1].map((copy) => (
-            <span key={copy} className="row" style={{ gap: 40 }}>
-              <span>⚡ You set the price</span>
-              <span style={{ color: "var(--primary-light)" }}>★</span>
-              <span>Transparent Platform Fee</span>
-              <span style={{ color: "var(--primary-light)" }}>★</span>
-              <span>Drivers keep 100% of negotiated fare</span>
-              <span style={{ color: "var(--primary-light)" }}>★</span>
-              <span>Bikes · Autos · Cabs</span>
-              <span style={{ color: "var(--primary-light)" }}>★</span>
-              <span>Zero Surge Algorithm</span>
-              <span style={{ color: "var(--primary-light)" }}>★</span>
+          {[0, 1, 2].map((copy) => (
+            <span key={copy} style={{ display: "inline-flex", alignItems: "center", gap: 32, paddingRight: 32 }}>
+              <span style={{ color: "#ffffff" }}>⚡ You set the price</span>
+              <span style={{ color: "var(--secondary)" }}>★</span>
+              <span style={{ color: "#ffffff" }}>Transparent Platform Fee</span>
+              <span style={{ color: "var(--secondary)" }}>★</span>
+              <span style={{ color: "#ffffff" }}>Drivers keep 100% of deal</span>
+              <span style={{ color: "var(--secondary)" }}>★</span>
+              <span style={{ color: "#ffffff" }}>Bikes · Autos · Cabs</span>
+              <span style={{ color: "var(--secondary)" }}>★</span>
+              <span style={{ color: "#ffffff" }}>Zero Surge Pricing</span>
+              <span style={{ color: "var(--secondary)" }}>★</span>
             </span>
           ))}
         </div>
@@ -123,28 +177,28 @@ export function Landing({
           justifyContent: "space-between",
           gap: 40,
           flexWrap: "wrap",
-          padding: "64px 32px 56px",
+          padding: "48px 24px 40px",
           maxWidth: 1200,
           margin: "0 auto",
           width: "100%",
         }}
       >
-        <div style={{ flex: "1 1 500px", maxWidth: 640 }}>
+        <div style={{ flex: "1 1 480px", maxWidth: 640 }}>
           <span
             className="brut-badge brut-badge-primary"
-            style={{ marginBottom: 20, display: "inline-flex" }}
+            style={{ marginBottom: 18, display: "inline-flex" }}
           >
             ✨ The Fair Price Ride Marketplace
           </span>
 
-          <h1 style={{ fontSize: "clamp(40px, 5.5vw, 64px)", lineHeight: 1.05, margin: "16px 0 22px" }}>
+          <h1 style={{ fontSize: "clamp(36px, 5.5vw, 60px)", lineHeight: 1.08, margin: "14px 0 20px" }}>
             You Name <br />
             <span
               style={{
                 display: "inline-block",
                 background: "var(--primary)",
                 color: "#ffffff",
-                padding: "2px 16px",
+                padding: "2px 14px",
                 border: "var(--brut-border)",
                 borderRadius: "var(--radius)",
                 boxShadow: "var(--shadow-md)",
@@ -156,29 +210,29 @@ export function Landing({
             Drivers Decide.
           </h1>
 
-          <p style={{ fontSize: 17, maxWidth: 520, fontWeight: 500, color: "var(--ink-soft)", marginBottom: 32, lineHeight: 1.6 }}>
+          <p style={{ fontSize: 16, maxWidth: 520, fontWeight: 500, color: "var(--ink-soft)", marginBottom: 28, lineHeight: 1.6 }}>
             Say goodbye to algorithmic surge price spikes. Choose what you want to pay, see our tiny upfront platform fee, and negotiate directly with nearby verified drivers.
           </p>
 
-          <div className="row" style={{ gap: 14, flexWrap: "wrap" }}>
+          <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
             <button
               type="button"
               onClick={onGetStarted}
               className="brut-btn brut-btn-primary"
-              style={{ fontSize: 15, padding: "14px 28px", boxShadow: "var(--shadow-md)" }}
+              style={{ fontSize: 15, padding: "12px 24px", boxShadow: "var(--shadow-md)" }}
             >
-              {isRider ? "🚀 Book Your Ride Now" : "🚀 Open Driver Console"}
+              🚀 Book Your Ride Now
             </button>
             <a
               href="#how"
               className="brut-btn brut-btn-white"
-              style={{ fontSize: 15, padding: "14px 24px" }}
+              style={{ fontSize: 15, padding: "12px 20px" }}
             >
               Learn More ↓
             </a>
           </div>
 
-          <div className="row" style={{ gap: 10, marginTop: 32, flexWrap: "wrap" }}>
+          <div className="row" style={{ gap: 8, marginTop: 28, flexWrap: "wrap" }}>
             <span className="brut-badge">🏍️ Bike Quick Rides</span>
             <span className="brut-badge">🛺 Auto Rickshaws</span>
             <span className="brut-badge">🚗 Prime Cabs</span>
@@ -187,37 +241,37 @@ export function Landing({
         </div>
 
         {/* Hero Visual Card */}
-        <div style={{ flex: "0 1 340px", margin: "0 auto" }}>
+        <div style={{ flex: "0 1 340px", width: "100%", margin: "0 auto" }}>
           <div
             className="brut-card"
             style={{
-              padding: 24,
+              padding: 22,
               boxShadow: "var(--shadow-lg)",
               background: "#ffffff",
               borderRadius: "var(--radius-lg)",
             }}
           >
-            <div className="spread" style={{ marginBottom: 16 }}>
+            <div className="spread" style={{ marginBottom: 14 }}>
               <span className="brut-badge brut-badge-green">● LIVE TRIP BIDDING</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)" }}>BANGALORE</span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-muted)" }}>BANGALORE</span>
             </div>
 
             <div
               className="brut-card brut-card-primary"
-              style={{ padding: 18, marginBottom: 16 }}
+              style={{ padding: 16, marginBottom: 14 }}
             >
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 Rider's Offer
               </div>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: 36, fontWeight: 900, color: "var(--ink)" }}>
-                ₹65 <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-soft)" }}>+ ₹10 fee</span>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, color: "var(--ink)" }}>
+                ₹65 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-soft)" }}>+ ₹10 fee</span>
               </div>
-              <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
+              <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
                 Estimated distance: 4.8 km · Indiranagar
               </div>
             </div>
 
-            <div className="col" style={{ gap: 10 }}>
+            <div className="col" style={{ gap: 8 }}>
               {[
                 { type: "🏍️ Bike Taxi", eta: "3 min away", bid: "₹65 (Accepted)", badge: "brut-badge-green" },
                 { type: "🛺 Auto Meter", eta: "5 min away", bid: "Counter: ₹75", badge: "brut-badge-primary" },
@@ -227,17 +281,17 @@ export function Landing({
                   key={item.type}
                   className="spread"
                   style={{
-                    padding: "10px 12px",
+                    padding: "8px 10px",
                     border: "var(--brut-border-thin)",
                     borderRadius: "var(--radius-sm)",
                     background: "var(--paper-subtle)",
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{item.type}</div>
+                    <div style={{ fontWeight: 700, fontSize: 12.5 }}>{item.type}</div>
                     <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>{item.eta}</div>
                   </div>
-                  <span className={`brut-badge ${item.badge}`} style={{ fontSize: 11 }}>
+                  <span className={`brut-badge ${item.badge}`} style={{ fontSize: 10.5 }}>
                     {item.bid}
                   </span>
                 </div>
@@ -248,7 +302,7 @@ export function Landing({
               type="button"
               onClick={onGetStarted}
               className="brut-btn brut-btn-primary brut-btn-full"
-              style={{ marginTop: 18 }}
+              style={{ marginTop: 16 }}
             >
               Try Negotiation Flow →
             </button>
@@ -257,12 +311,12 @@ export function Landing({
       </section>
 
       {/* ============ HOW IT WORKS ============ */}
-      <section id="how" style={{ padding: "64px 32px", background: "#ffffff", borderTop: "var(--brut-border)", borderBottom: "var(--brut-border)" }}>
+      <section id="how" style={{ padding: "56px 24px", background: "#ffffff", borderTop: "var(--brut-border)", borderBottom: "var(--brut-border)" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ textAlign: "center", marginBottom: 48 }}>
-            <span className="brut-badge brut-badge-primary" style={{ marginBottom: 12 }}>SIMPLE PRINCIPLES</span>
-            <h2 style={{ fontSize: "clamp(28px, 4vw, 42px)" }}>How Chalo-X Works</h2>
-            <p style={{ color: "var(--ink-soft)", fontWeight: 500, marginTop: 8, fontSize: 16 }}>
+          <div style={{ textAlign: "center", marginBottom: 40 }}>
+            <span className="brut-badge brut-badge-primary" style={{ marginBottom: 10 }}>SIMPLE PRINCIPLES</span>
+            <h2 style={{ fontSize: "clamp(26px, 3.5vw, 38px)" }}>How Chalo-X Works</h2>
+            <p style={{ color: "var(--ink-soft)", fontWeight: 500, marginTop: 6, fontSize: 15 }}>
               No hidden commissions. No surge penalties. Just honest direct connection.
             </p>
           </div>
@@ -270,8 +324,8 @@ export function Landing({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: 24,
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 20,
             }}
           >
             {[
@@ -298,7 +352,7 @@ export function Landing({
                 key={card.step}
                 className="brut-card"
                 style={{
-                  padding: 28,
+                  padding: 24,
                   position: "relative",
                   display: "flex",
                   flexDirection: "column",
@@ -306,11 +360,11 @@ export function Landing({
                 }}
               >
                 <div>
-                  <div className="spread" style={{ marginBottom: 16 }}>
+                  <div className="spread" style={{ marginBottom: 14 }}>
                     <span
                       style={{
                         fontFamily: "var(--font-display)",
-                        fontSize: 32,
+                        fontSize: 28,
                         fontWeight: 900,
                         color: "var(--primary)",
                       }}
@@ -319,8 +373,8 @@ export function Landing({
                     </span>
                     <span className="brut-badge brut-badge-primary">{card.badge}</span>
                   </div>
-                  <h3 style={{ fontSize: 19, marginBottom: 12 }}>{card.title}</h3>
-                  <p style={{ color: "var(--ink-soft)", fontSize: 14, lineHeight: 1.6 }}>{card.desc}</p>
+                  <h3 style={{ fontSize: 18, marginBottom: 10 }}>{card.title}</h3>
+                  <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>{card.desc}</p>
                 </div>
               </div>
             ))}
@@ -332,15 +386,15 @@ export function Landing({
       <footer
         className="spread"
         style={{
-          padding: "24px 32px",
+          padding: "20px 24px",
           background: "var(--paper)",
           marginTop: "auto",
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-soft)" }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-soft)" }}>
           © {new Date().getFullYear()} Chalo-X. Open Fair-Price Ride Platform.
         </div>
-        <div className="row" style={{ gap: 16 }}>
+        <div className="row" style={{ gap: 12 }}>
           <button
             type="button"
             onClick={onGetStarted}

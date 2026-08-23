@@ -1,0 +1,113 @@
+import type {
+  AuthSession,
+  DriverOfferPayload,
+  DriverWsMessage,
+  TripView,
+} from "@chalo/protocol";
+
+const TOKEN_KEY = "cx.driver.token";
+export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
+export const setToken = (t: string): void => localStorage.setItem(TOKEN_KEY, t);
+export const clearToken = (): void => localStorage.removeItem(TOKEN_KEY);
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const token = getToken();
+  const res = await fetch(path, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: body === undefined ? (method === "GET" ? undefined : "{}") : JSON.stringify(body),
+  });
+  const json: unknown = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = json as { code?: string; message?: string };
+    throw new ApiError(res.status, e.code ?? "INTERNAL", e.message ?? res.statusText);
+  }
+  return json as T;
+}
+
+export const api = {
+  sendOtp: (phone: string) =>
+    call<{ sent: boolean; devHint?: string }>("/v1/auth/otp/send", "POST", { phone }),
+  verifyOtp: (phone: string, otp: string) =>
+    call<AuthSession>("/v1/auth/otp/verify", "POST", { phone, otp, role: "DRIVER" }),
+  driverMe: () =>
+    call<{
+      profile: { vehicle_class: string; plate: string; kyc_status: string; online: boolean } | null;
+      walletBalancePaise: number;
+      completedTrips: number;
+    }>("/v1/driver/me", "GET"),
+  acceptNegotiation: (id: string) =>
+    call<{ tripId: string }>(`/v1/negotiations/${id}/accept`, "POST"),
+  counterNegotiation: (id: string, paise: number) =>
+    call<{ state: string; round: number }>(`/v1/negotiations/${id}/counter`, "POST", { paise }),
+  trip: (id: string) => call<TripView>(`/v1/trips/${id}`, "GET"),
+  trips: () => call<{ trips: TripView[] }>("/v1/trips", "GET"),
+  tripState: (id: string, to: "ARRIVING" | "ARRIVED") =>
+    call<{ state: string }>(`/v1/trips/${id}/state`, "POST", { to }),
+  startTrip: (id: string, otp: string) =>
+    call<{ state: string }>(`/v1/trips/${id}/start`, "POST", { otp }),
+  completeTrip: (id: string, tipPaise: number) =>
+    call<{ state: string; txnId: string }>(`/v1/trips/${id}/complete`, "POST", { tipPaise }),
+};
+
+/** Raw WebSocket to /ws/driver with auto-reconnect. */
+export interface DriverSocket {
+  send(msg: unknown): void;
+  readonly readyState: number;
+  close(): void;
+}
+
+export function connectDriverSocket(
+  token: string,
+  onMessage: (msg: DriverWsMessage) => void,
+  onStatus: (connected: boolean) => void,
+): DriverSocket {
+  let closed = false;
+  let ws: WebSocket | null = null;
+
+  const sock: DriverSocket = {
+    send: (msg) => ws?.send(JSON.stringify(msg)),
+    get readyState() {
+      return ws?.readyState ?? WebSocket.CLOSED;
+    },
+    close: () => {
+      closed = true;
+      ws?.close();
+    },
+  };
+
+  const open = (): void => {
+    if (closed) return;
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/ws/driver?token=${encodeURIComponent(token)}`);
+    ws.onopen = () => onStatus(true);
+    ws.onclose = () => {
+      onStatus(false);
+      if (!closed) setTimeout(open, 2000);
+    };
+    ws.onerror = () => ws?.close();
+    ws.onmessage = (ev) => {
+      try {
+        onMessage(JSON.parse(ev.data as string) as DriverWsMessage);
+      } catch {
+        // ignore malformed frames
+      }
+    };
+  };
+  open();
+  return sock;
+}
+
+export type Offer = DriverOfferPayload;

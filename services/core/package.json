@@ -8,7 +8,7 @@
     "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
     "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types --experimental-detect-module src/**/*.test.ts",
+    "test": "tsx --test src/**/*.test.ts",
     "test:e2e": "tsx --env-file-if-exists=.env src/e2e-fullflow.ts",
     "test:verify": "tsx --env-file-if-exists=.env src/verify-all.ts"
   },
@@ -21,11 +21,13 @@
     "ioredis": "^5.4.1",
     "jose": "^5.9.6",
     "pg": "^8.13.1",
+    "web-push": "^3.6.7",
     "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.2"
   }

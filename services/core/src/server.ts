@@ -182,14 +182,9 @@ export async function startServer(listenPort = PORT): Promise<{
     return { token: await issueToken(user.id, role!), userId: user.id, role };
   });
 
-  // ---- quotes ----------------------------------------------------------------
-
   app.post("/v1/quotes", async (req) => {
-    const sess = requireAuth(await session(req));
-    void sess;
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
     if (!body.pickup || !body.drop) fail(400, "BAD_BODY", "pickup and drop required");
-
     const classes = body.vehicleClasses ?? [...VEHICLE_CLASSES];
     const quotes = [];
     for (const vc of classes) {

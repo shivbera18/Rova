@@ -516,11 +516,12 @@ async function runVerification(): Promise<void> {
     await offerWaiter;
     const acceptRes = await api(`/v1/requests/${reqRes.json.sessionId}/accept`, {}, driverToken);
     const tripId = acceptRes.json.tripId;
-    const tripView = (await api(`/v1/trips/${tripId}`, undefined, riderToken)).json;
 
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVING" }, driverToken);
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVED" }, driverToken);
-    await api(`/v1/trips/${tripId}/start`, { otp: tripView.otp }, riderToken);
+    const regenRes = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);
+    assert(regenRes.status === 200 && !!regenRes.json.otp, "Rider retrieved start OTP via secure regenerate-otp endpoint");
+    await api(`/v1/trips/${tripId}/start`, { otp: regenRes.json.otp }, riderToken);
     await api(`/v1/trips/${tripId}/complete`, {}, driverToken);
 
     const rateRes = await api(`/v1/trips/${tripId}/rate`, { stars: 5, comment: "Great ride!" }, riderToken);
@@ -529,14 +530,48 @@ async function runVerification(): Promise<void> {
     const dupRateRes = await api(`/v1/trips/${tripId}/rate`, { stars: 4 }, riderToken);
     assert(dupRateRes.status === 409, "Duplicate rating on same trip is properly rejected (HTTP 409)");
   }
-
-  // --- Scenario H: Driver Profile & Wallet Integrity ---
   console.log("\n  [Scenario H] Driver Profile & Wallet Accounting");
   {
     const meRes = await api("/v1/driver/me", undefined, driverToken);
     assert(meRes.status === 200, "Driver summary endpoint /v1/driver/me returns 200");
     assert(meRes.json.completedTrips > 0, "Driver completed trips count incremented");
     assert(meRes.json.walletBalancePaise > 0, "Driver wallet balance reflects earnings from completed trips");
+  }
+
+  // --- Scenario I: Role Mismatch & Driver KYC Gate (C4 Fix) ---
+  console.log("\n  [Scenario I] Role Protection & KYC Approval Gate");
+  {
+    // Attempting to log in with an existing rider phone as DRIVER must be rejected
+    const roleMismatch = await api("/v1/auth/otp/verify", { phone: "+919900000001", otp: "123456", role: "DRIVER" });
+    assert(roleMismatch.status === 400 || roleMismatch.status === 403 || roleMismatch.json.code === "ROLE_MISMATCH", "Rider phone cannot masquerade as DRIVER (HTTP 400/403 ROLE_MISMATCH)");
+  }
+
+  // --- Scenario J: Background Negotiation Expiry Sweeper (C1 Fix) ---
+  console.log("\n  [Scenario J] Background Negotiation Expiry Sweeper");
+  {
+    const quotesRes = await api("/v1/quotes", { pickup, drop }, riderToken);
+    const bikeQuote = quotesRes.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+    const reqRes = await api("/v1/requests", {
+      quoteToken: bikeQuote.quoteToken,
+      offerPaise: 2200,
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+    }, riderToken);
+    assert(reqRes.status === 200, "Request created for expiry test");
+
+    // Fast-forward expires_at in DB
+    await serverHandle?.storage.sql.query(
+      "UPDATE negotiations SET expires_at = now() - interval '5 seconds' WHERE id = $1",
+      [reqRes.json.negotiationId]
+    );
+
+    // Wait for the 1s background sweeper to process it
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const checkExp = await api(`/v1/requests/${reqRes.json.sessionId}`, undefined, riderToken);
+    assert(checkExp.json.state === "EXPIRED", "Background sweeper transitioned expired negotiation to EXPIRED");
   }
 
   riderWs.close();

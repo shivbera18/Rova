@@ -15,6 +15,7 @@ import type { DriverWsMessage, RiderWsMessage, VehicleClass } from "@chalo/proto
 import { VEHICLE_CLASSES } from "@chalo/protocol";
 import { openStorage } from "./db/storage.ts";
 import type { Storage } from "./db/storage.ts";
+import { runMigrations } from "./db/migrate.ts";
 import { DEV_OTP, issueToken, upsertUser, verifyToken } from "./auth.ts";
 import { walletBalance } from "./ledger.ts";
 import { estimateDistanceKm, issueQuoteToken, quoteTrip, verifyQuoteToken } from "./pricing.ts";
@@ -28,6 +29,7 @@ import {
   riderAcceptCounter,
   riderDecline,
   riderFinalOffer,
+  sweepExpiredNegotiations,
 } from "./negotiation.ts";
 import {
   broadcastOffer,
@@ -42,13 +44,13 @@ import {
 import {
   createTripFromAgreement,
   getTrip,
+  readFareJson,
+  regenerateTripOtp,
   settleTrip,
   transitionTrip,
-  readFareJson,
   TripError,
   verifyStartOtp,
 } from "./trips.ts";
-import { runMigrations } from "./db/migrate.ts";
 import type { LatLon } from "./types.ts";
 import type { TripRow } from "./db/rows.ts";
 
@@ -100,8 +102,19 @@ export async function startServer(listenPort = PORT): Promise<{
     return verifyToken(header.slice(7));
   }
 
-  // ---- auth ------------------------------------------------------------------
-
+  async function requireApprovedDriver(driverId: string, vehicleClass?: string): Promise<void> {
+    const r = await sql.query<{ kyc_status: string; vehicle_class: string }>(
+      "SELECT kyc_status, vehicle_class FROM driver_profiles WHERE user_id=$1",
+      [driverId],
+    );
+    const p = r.rows[0];
+    if (!p || p.kyc_status !== "APPROVED") {
+      fail(403, "KYC_NOT_APPROVED", "Driver account is not KYC approved");
+    }
+    if (vehicleClass && p.vehicle_class !== vehicleClass) {
+      fail(403, "VEHICLE_CLASS_MISMATCH", `Driver vehicle (${p.vehicle_class}) does not match ride (${vehicleClass})`);
+    }
+  }
   app.post("/v1/auth/otp/send", async (req) => {
     const { phone } = req.body as { phone?: string };
     if (!phone || !/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
@@ -316,17 +329,17 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
     const { id } = req.params as { id: string };
     const rr = (
-      await sql.query<{ mode: string; state: string }>(
-        "SELECT mode, state FROM ride_requests WHERE id=$1",
+      await sql.query<{ mode: string; state: string; vehicle_class: string }>(
+        "SELECT mode, state, vehicle_class FROM ride_requests WHERE id=$1",
         [id],
       )
     ).rows[0];
     if (!rr) fail(404, "NOT_FOUND", "no such request");
     if (rr.mode !== "LIST" || rr.state !== "MATCHING") fail(409, "NOT_CLAIMABLE", "not an open list request");
+    await requireApprovedDriver(sess.userId, rr.vehicle_class);
     const trip = await finalizeAgreement(id, "", sess.userId);
     return { tripId: trip.tripId };
   });
-
 
   app.post("/v1/negotiations/:id/accept", async (req) => {
     // DRIVER accepts the rider-side offer
@@ -334,6 +347,9 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!sess || sess.role !== "DRIVER") fail(403, "FORBIDDEN", "driver only");
     const { id } = req.params as { id: string };
     try {
+      const neg0 = await getNegotiation(sql, id);
+      if (!neg0) fail(404, "NOT_FOUND", "no such negotiation");
+      await requireApprovedDriver(sess.userId, neg0.vehicle_class);
       const neg = await driverAccept(sql, id, sess.userId);
       const trip = await finalizeAgreement(neg.request_id, neg.id, sess.userId);
       return { tripId: trip.tripId };
@@ -353,6 +369,7 @@ export async function startServer(listenPort = PORT): Promise<{
     try {
       const neg0 = await getNegotiation(sql, id);
       if (!neg0) fail(404, "NOT_FOUND", "no such negotiation");
+      await requireApprovedDriver(sess.userId, neg0.vehicle_class);
       if (!claimRequest(neg0.request_id, sess.userId)) {
         fail(409, "ALREADY_CLAIMED", "another driver is countering");
       }
@@ -507,18 +524,24 @@ export async function startServer(listenPort = PORT): Promise<{
     if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {
       fail(403, "FORBIDDEN", "not your trip");
     }
-    // # ponytail: plaintext recovery for the rider pre-ride; production rotates OTP instead
-    const view = tripView(trip);
-    if (sess.userId === trip.rider_id && ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state)) {
-      const r = await sql.query<{ otp_plain: string | null }>(
-        "SELECT otp_plain FROM otp_codes WHERE trip_id=$1",
-        [id],
-      );
-      view.otp = r.rows[0]?.otp_plain ?? undefined;
-    }
-    return view;
+    return tripView(trip);
   });
 
+  app.post("/v1/trips/:id/regenerate-otp", async (req) => {
+    const sess = await session(req);
+    if (!sess) fail(401, "UNAUTHORIZED", "sign in");
+    const { id } = req.params as { id: string };
+    const trip = await getTrip(sql, id);
+    if (!trip) fail(404, "NOT_FOUND", "no such trip");
+    if (trip.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
+    try {
+      const newOtp = await regenerateTripOtp(sql, id);
+      return { otp: newOtp };
+    } catch (err) {
+      if (err instanceof TripError) fail(409, err.code, err.message);
+      throw err;
+    }
+  });
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {
     const fare = readFareJson(trip.fare_json);
     const driver = getLiveDriver(trip.driver_id);
@@ -786,18 +809,39 @@ export async function startServer(listenPort = PORT): Promise<{
     reply.status(status).send({ code, message });
   });
 
+  const sweeperTimer = setInterval(async () => {
+    try {
+      const expired = await sweepExpiredNegotiations(sql);
+      for (const exp of expired) {
+        releaseClaim(exp.requestId);
+        pushRider(exp.riderId, {
+          t: "request.updated",
+          session: {
+            id: exp.requestId,
+            mode: "NEGOTIATED",
+            state: "EXPIRED",
+            round: 3,
+            maxRounds: 3,
+            listPrice: 0 as never,
+          },
+        });
+      }
+    } catch {}
+  }, 1000);
+  sweeperTimer.unref();
+
   await app.listen({ port: listenPort, host: "127.0.0.1" });
   console.log(`[core] listening on :${listenPort} (storage: ${storage.kind})`);
   return {
     app,
     storage,
     close: async () => {
+      clearInterval(sweeperTimer);
       await app.close();
       await storage.close();
     },
   };
 }
-
 if (process.argv[1]?.replace(/\\/g, "/").endsWith("server.ts")) {
   startServer().catch((err: unknown) => {
     console.error("[core] fatal", err);

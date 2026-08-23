@@ -169,3 +169,41 @@ Rappi is broader than ride-hailing. The following are not required for ride-mark
 1. Pool/shared rides.
 2. Fleet partner operations.
 3. Rappi-style food, grocery, retail, and courier verticals.
+
+---
+
+## Audit Addendum — code-verified second pass
+
+> Every row above was re-checked against the working tree after the P0/P1 remediation commits (`a10b7e0`…`1153123`). This addendum corrects rows that have gone stale and records newly found gaps with file-level evidence.
+
+### A. Rows now outdated (implemented since this doc was written)
+
+| Row | Actual state |
+|---|---|
+| Rate limiting and abuse protection — "Not implemented" | **Done**: `security.ts` enforces per-IP global (300/min), OTP per-IP + per-phone buckets, ride-request caps, offer/fee fraud ceilings, GPS jump detection (`server.ts:139,211-212`) |
+| Push notifications — "Not implemented" | **Done**: Web Push w/ VAPID, subscriptions persisted, fired on driver-offer, counter, assignment, and driver-disconnect (`push.ts`; `server.ts:470,568,879,985`). Remaining gap is only trip-state pushes |
+| Route-based navigation / road distance — "Haversine approximation" | **Done**: OSRM road routing with cached results and deterministic Haversine fallback (`routing.ts`) |
+| Accurate pickup ETA from live traffic | **Partially done**: OSRM durations + transparent Bengaluru time-of-day traffic multiplier; no live-traffic feed yet |
+| Wallet top-up / withdrawal UI | **Dev-complete**: top-up endpoint + UI live in dev, honestly 501-gated in prod pending gateway; payout moves journal balances, bank rails pending |
+| Driver onboarding/KYC | **Flow exists**: `/v1/driver/onboarding` + approval + `OnboardingCard.tsx` UI. Document upload/expiry tracking and a real admin approver still missing — and see addendum B4 below |
+
+### B. Gaps not previously listed in this document
+
+1. **Quote tokens are replayable** — HMAC-only, no single-use nonce (`pricing.ts`). One captured token can spawn unlimited dispatch broadcasts. Mark jti consumed on first use.
+2. **Expiry sweeper pushes a fabricated session** — `mode:"NEGOTIATED", round:3, listPrice:0 as never` (sweeper block, `server.ts:1198`). Expired LIST bookings tell the rider UI "Round 3 of 3 · List ₹0".
+3. **Stale-driver-card leak paths remain**: `createNegotiation` auto-cancels a rider's prior negotiation without `cancelBroadcast`, and the sweeper's expiry path doesn't fan out either — only explicit cancel/decline do (`server.ts:508,666` are the sole call sites).
+4. **LIST-mode `ride_requests` are never swept server-side** — client countdown timers hide permanently-MATCHING rows in the DB.
+5. **Duplicate driver tabs silently replace each other** in `driverConns`/`liveDrivers` — tab #1 renders ghost state and can double-accept. Reject duplicates or sync via `BroadcastChannel`.
+6. **Trips history is a flat `LIMIT 50`** with no cursor pagination (`server.ts:1099`) — power users lose older history permanently.
+7. **No CI workflows** in `.github/` — typecheck, unit tests, the 66-check full-flow suite, and builds are all manual. Highest-leverage one-liner in this addendum.
+8. **No load testing** — dispatch fan-out, ring broadcast, and the 1s sweeper are unvalidated beyond toy volumes (k6/artillery against the existing E2E fixture).
+9. **No feature-flag mechanism** — night multiplier, dev hints, and new surfaces are compile-time toggles.
+10. **No i18n runtime** — English-only strings across both consoles for an India-first product.
+11. **Not installable** — no PWA manifest/service worker; add-to-homescreen is table stakes for this market.
+12. **JWT_SECRET fallback has no boot guard** — `pricing.ts:14` falls back to a known constant; production must refuse to start on default secrets (forgeable quote tokens, spoofable sessions).
+13. **Browser-direct Nominatim geocoding** (`LocationSearch.tsx`) — OSM usage policy prohibits heavy automated use; needs a server-side proxy/cache or a commercial provider before launch.
+14. **Driver console still has no logout control** — escape is waiting out the 12h JWT or clearing localStorage.
+15. **Neon backup/PITR + failover runbook** undocumented — location history of real users is being written with no stated lifecycle or restore story.
+16. **No API surface documentation** (OpenAPI/protocol reference) for future partner or internal consumers.
+17. **No accessibility conformance pass** (WCAG AA audit) — semantics are decent but unverified with keyboard/screen reader.
+

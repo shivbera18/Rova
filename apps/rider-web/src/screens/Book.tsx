@@ -3,6 +3,7 @@ import type { LatLon, RiderWsMessage } from "@chalo/protocol";
 import { formatINR, paisa } from "@chalo/protocol";
 import MapView from "../components/MapView";
 import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet";
+import { LocationSearch, type SelectedPlace } from "../components/LocationSearch";
 import CounterModal, { type DriverCounter } from "../components/CounterModal";
 import { useCountdown, useRiderSocket } from "../ws";
 import {
@@ -82,6 +83,8 @@ export default function Book(): React.ReactElement {
   const [phase, setPhase] = useState<Phase>({ k: "pick" });
   const [payMethod, setPayMethod] = useState<(typeof PAY_METHODS)[number]>("UPI");
   const [loadingQuotes, setLoadingQuotes] = useState(false);
+  const [pickupLabel, setPickupLabel] = useState("");
+  const [dropLabel, setDropLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [tipPaise, setTipPaise] = useState(0);
   const [rated, setRated] = useState(false);
@@ -197,56 +200,64 @@ export default function Book(): React.ReactElement {
     return json.quotes;
   }
 
+  async function loadQuotesForRoute(a: LatLon, b: LatLon): Promise<void> {
+    setLoadingQuotes(true);
+    setError(null);
+    try {
+      const quotes = await fetchQuotes(a, b);
+      setPhase({ k: "quotes", quotes });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch quotes");
+    } finally {
+      setLoadingQuotes(false);
+    }
+  }
+
   async function onMapClick(ll: LatLon): Promise<void> {
     if (phase.k !== "pick" || loadingQuotes) return;
     setError(null);
-    let nextPickup = pickup;
-    let nextDrop = drop;
-    if (!nextPickup || (nextPickup && nextDrop)) {
+    if (!pickup || (pickup && drop)) {
       setPickup(ll);
+      setPickupLabel("Pinned pickup location");
       setDrop(null);
+      setDropLabel("");
       return;
     }
-    nextDrop = ll;
     setDrop(ll);
-    setLoadingQuotes(true);
-    try {
-      const quotes = await fetchQuotes(nextPickup!, nextDrop!);
-      setPhase({ k: "quotes", quotes });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch quotes");
-      setDrop(null);
-    } finally {
-      setLoadingQuotes(false);
-    }
+    setDropLabel("Pinned drop-off location");
+    await loadQuotesForRoute(pickup, ll);
   }
 
+  async function selectSearchPlace(kind: "pickup" | "drop", place: SelectedPlace): Promise<void> {
+    if (kind === "pickup") {
+      setPickup(place.position);
+      setPickupLabel(place.label);
+      if (drop) await loadQuotesForRoute(place.position, drop);
+      return;
+    }
+    setDrop(place.position);
+    setDropLabel(place.label);
+    if (pickup) await loadQuotesForRoute(pickup, place.position);
+  }
   async function selectPopularRoute(route: typeof POPULAR_ROUTES[0]): Promise<void> {
     setPickup(route.pickup);
+    setPickupLabel(route.label.split("➔")[0]?.replace("⚡", "").trim() ?? "Pickup");
     setDrop(route.drop);
-    setLoadingQuotes(true);
-    setError(null);
-    try {
-      const quotes = await fetchQuotes(route.pickup, route.drop);
-      setPhase({ k: "quotes", quotes });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch quotes");
-    } finally {
-      setLoadingQuotes(false);
-    }
+    setDropLabel(route.label.split("➔")[1]?.trim() ?? "Drop-off");
+    await loadQuotesForRoute(route.pickup, route.drop);
   }
-
   function reset(): void {
     stopPoll();
     setPickup(null);
+    setPickupLabel("");
     setDrop(null);
+    setDropLabel("");
     setError(null);
     setRated(false);
     setTipPaise(0);
     setSelectedTag(null);
     setPhase({ k: "pick" });
   }
-
   async function onCounterResolved(outcome: "accepted" | "declined" | "final"): Promise<void> {
     if (outcome === "accepted") return;
     if (outcome === "declined") {
@@ -279,44 +290,88 @@ export default function Book(): React.ReactElement {
         )}
 
         {phase.k === "pick" && (
-          <div className="card panel-card">
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800 }}>Where to?</h3>
-            <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-              Tap map to set <strong>Pickup (P)</strong> then <strong>Drop (D)</strong>, or choose a quick route below.
-            </p>
+          <section className="booking-sheet">
+            <div className="booking-sheet-head">
+              <div>
+                <span className="eyebrow">BOOK A RIDE</span>
+                <h2>Where are you going?</h2>
+                <p>Search an address, choose a saved route, or pin both points on the map.</p>
+              </div>
+              <span className="brut-badge brut-badge-green">LIVE FARES</span>
+            </div>
 
-            <div className="step-label">Quick Popular Routes:</div>
+            <div className="route-search-stack">
+              <div className="route-connector" aria-hidden />
+              <LocationSearch
+                kind="pickup"
+                value={pickupLabel}
+                placeholder="Search pickup — e.g. Koramangala"
+                onSelect={(place) => void selectSearchPlace("pickup", place)}
+                onClear={() => {
+                  setPickup(null);
+                  setPickupLabel("");
+                }}
+              />
+              <LocationSearch
+                kind="drop"
+                value={dropLabel}
+                placeholder="Where to? — e.g. Jayanagar"
+                onSelect={(place) => void selectSearchPlace("drop", place)}
+                onClear={() => {
+                  setDrop(null);
+                  setDropLabel("");
+                }}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="use-location-btn"
+              onClick={() => {
+                if (!navigator.geolocation) {
+                  setError("Location is not supported by this browser");
+                  return;
+                }
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    setPickup({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                    setPickupLabel("My current location");
+                  },
+                  () => setError("Location permission was denied"),
+                  { enableHighAccuracy: true, timeout: 8000 },
+                );
+              }}
+            >
+              ◎ Use my current location
+            </button>
+
+            <div className="booking-divider"><span>POPULAR</span></div>
             <div className="quick-places-row">
               {POPULAR_ROUTES.map((r) => (
-                <button
-                  key={r.label}
-                  type="button"
-                  className="chip-place"
-                  onClick={() => void selectPopularRoute(r)}
-                >
-                  {r.label}
+                <button key={r.label} type="button" className="saved-route" onClick={() => void selectPopularRoute(r)}>
+                  <span>↗</span>
+                  <small>{r.label.replace("⚡ ", "")}</small>
                 </button>
               ))}
             </div>
 
-            <div className="step-label" style={{ marginTop: 6 }}>Payment method</div>
-            <div className="row">
-              {PAY_METHODS.map((pm) => (
-                <button key={pm} className={`chip ${payMethod === pm ? "selected" : ""}`} onClick={() => setPayMethod(pm)}>
-                  {pm === "UPI" ? "⚡ UPI" : pm === "WALLET" ? "💳 Wallet" : "💵 Cash"}
-                </button>
-              ))}
-            </div>
-
-            {loadingQuotes && <p className="muted" style={{ marginTop: 12 }}>⚡ Fetching real-time fares…</p>}
-            {pickup && !drop && !loadingQuotes && (
-              <div className="ok-text" style={{ marginTop: 12 }}>
-                ✓ Pickup set! Now tap the map for your destination.
+            <div className="booking-options">
+              <div>
+                <span className="option-label">Payment</span>
+                <div className="row">
+                  {PAY_METHODS.map((pm) => (
+                    <button key={pm} className={`payment-pill ${payMethod === pm ? "selected" : ""}`} onClick={() => setPayMethod(pm)}>
+                      {pm === "UPI" ? "⚡ UPI" : pm === "WALLET" ? "▣ Wallet" : "₹ Cash"}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
-          </div>
-        )}
+              <span className="map-tip">Tip: click the map to pin locations</span>
+            </div>
 
+            {loadingQuotes && <div className="loading-fares"><span className="search-spinner" /> Calculating live fares…</div>}
+          </section>
+        )}
         {phase.k === "quotes" && (
           <div className="card panel-card">
             <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 800 }}>Choose Vehicle</h3>

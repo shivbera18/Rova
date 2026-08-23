@@ -3,12 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@10.12.3",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
     "dev:rider": "pnpm --filter rider-web dev",
     "dev:driver": "pnpm --filter driver-web dev",
     "dev:core": "pnpm --filter @chalo/core dev",
+    "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test"
   },

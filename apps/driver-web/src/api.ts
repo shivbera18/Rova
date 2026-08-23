@@ -31,11 +31,11 @@ async function call<T>(path: string, method: string, body?: unknown): Promise<T>
   });
   const json: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401) {
+    const e = json as { code?: string; message?: string };
+    if (res.status === 401 || (res.status === 403 && e.code === "FORBIDDEN")) {
       clearToken();
       window.dispatchEvent(new Event("storage"));
     }
-    const e = json as { code?: string; message?: string };
     throw new ApiError(res.status, e.code ?? "INTERNAL", e.message ?? res.statusText);
   }
   return json as T;

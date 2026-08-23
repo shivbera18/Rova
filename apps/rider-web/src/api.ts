@@ -36,7 +36,7 @@ export async function api<T>(
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    if (res.status === 401) {
+    if (res.status === 401 || (res.status === 403 && json.code === "FORBIDDEN")) {
       setToken(null);
       window.dispatchEvent(new Event("storage"));
     }

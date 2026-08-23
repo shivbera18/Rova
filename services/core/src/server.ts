@@ -18,7 +18,7 @@ import type { Storage } from "./db/storage.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { logger } from "./logger.ts";
 import { seedData } from "./db/seed.ts";
-import { DEV_OTP, issueToken, upsertUser, upsertUserWithPassword, verifyToken } from "./auth.ts";
+import { DEV_OTP, issueToken, setUserPassword, upsertUser, upsertUserWithPassword, verifyToken } from "./auth.ts";
 import { estimateDistanceKm, issueQuoteToken, quoteTrip, verifyQuoteToken } from "./pricing.ts";
 import {
   cancelByRider,
@@ -53,7 +53,7 @@ import {
   TripError,
   verifyStartOtp,
 } from "./trips.ts";
-import { walletBalance } from "./ledger.ts";
+import { postTransaction, walletBalance } from "./ledger.ts";
 import type { LatLon } from "./types.ts";
 import type { TripRow } from "./db/rows.ts";
 import { enforceRateLimit, validateDriverGps, validateRideRequest } from "./security.ts";
@@ -93,6 +93,9 @@ export async function startServer(listenPort = PORT): Promise<{
   storage: Storage;
   close: () => Promise<void>;
 }> {
+  if (process.env.NODE_ENV === "production" && (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes("dev-only"))) {
+    throw new Error("JWT_SECRET must be a strong explicit production secret");
+  }
   const storage: Storage = await openStorage();
   const sql = storage.sql;
   await runMigrations(sql);
@@ -110,6 +113,10 @@ export async function startServer(listenPort = PORT): Promise<{
 
   app.addHook("onRequest", async (req) => {
     (req as any)._startTime = performance.now();
+  });
+  app.get("/healthz", async () => {
+    await sql.query("SELECT 1");
+    return { ok: true, storage: storage.kind, time: new Date().toISOString() };
   });
   app.addHook("onResponse", async (req, reply) => {
     const start = (req as any)._startTime ?? performance.now();
@@ -179,7 +186,7 @@ export async function startServer(listenPort = PORT): Promise<{
     await sql.query(
       `INSERT INTO driver_profiles
        (user_id, vehicle_class, plate, kyc_status, online, on_trip)
-       VALUES ($1,$2,$3,'APPROVED',false,false)`,
+       VALUES ($1,$2,$3,'PENDING_DOCS',false,false)`,
       [driverId, requested, `PENDING-${driverId.slice(0, 6).toUpperCase()}`],
     );
     return requested;
@@ -195,17 +202,19 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/auth/otp/verify", async (req) => {
-    const { phone, otp, role, fullName, vehicleClass } = req.body as {
+    const { phone, otp, role, fullName, vehicleClass, newPassword } = req.body as {
       phone?: string;
       otp?: string;
       role?: "RIDER" | "DRIVER";
       fullName?: string;
       vehicleClass?: string;
+      newPassword?: string;
     };
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
     if (otp !== DEV_OTP) fail(401, "BAD_OTP", "wrong code");
     const user = await upsertUser(sql, phone!, role!, fullName ?? "Chalo user");
     if (role === "DRIVER") await ensureDriverVehicle(user.id, vehicleClass);
+    if (newPassword) await setUserPassword(sql, user.id, newPassword);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
   });
   // Password login: first sign-up registers the password; later logins verify it.
@@ -244,6 +253,30 @@ export async function startServer(listenPort = PORT): Promise<{
     return { quotes };
   });
 
+
+  app.get("/v1/wallet/me", async (req) => {
+    const sess = requireAuth(await session(req));
+    const prefix = sess.role === "RIDER" ? "user" : "driver";
+    return { balancePaise: await walletBalance(sql, `${prefix}:${sess.userId}:WALLET`) };
+  });
+
+  app.post("/v1/wallet/topup", async (req) => {
+    const sess = requireRider(await session(req));
+    const { amountPaise } = req.body as { amountPaise?: number };
+    if (!Number.isSafeInteger(amountPaise) || amountPaise! < 1000 || amountPaise! > 100_000) {
+      fail(400, "INVALID_TOPUP", "top-up must be between ₹10 and ₹1,000");
+    }
+    if (process.env.NODE_ENV === "production") {
+      fail(501, "PAYMENT_PROVIDER_REQUIRED", "production top-up requires payment gateway confirmation");
+    }
+    const txn = await postTransaction(
+      sql,
+      [{ debitAccount: "platform:BANK", creditAccount: `user:${sess.userId}:WALLET`, amountPaise: amountPaise!, reason: "TOPUP" }],
+      null,
+      `topup:${sess.userId}:${randomUUID()}`,
+    );
+    return { ok: true, txnId: txn.txnId, balancePaise: await walletBalance(sql, `user:${sess.userId}:WALLET`) };
+  });
   app.get("/v1/push/vapid-key", async () => ({ publicKey: vapidPublicKey() }));
 
   app.post("/v1/push/subscribe", async (req) => {
@@ -291,6 +324,13 @@ export async function startServer(listenPort = PORT): Promise<{
       pickup: body.pickup!,
       drop: body.drop!,
     });
+    const riderCharge = (negotiated ? body.offerPaise! : payload!.tf) + platformContribution;
+    if (body.paymentMethod === "WALLET") {
+      const balance = await walletBalance(sql, `user:${sess.userId}:WALLET`);
+      if (balance < riderCharge) {
+        fail(402, "INSUFFICIENT_WALLET", `Wallet needs ₹${(riderCharge / 100).toFixed(2)}; current balance is ₹${(balance / 100).toFixed(2)}`);
+      }
+    }
     const requestId = randomUUID();
     await sql.query(
       `INSERT INTO ride_requests
@@ -606,7 +646,6 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   // ---- trips ----------------------------------------------------------------------
-
   app.post("/v1/trips/:id/state", async (req) => {
     const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
@@ -629,36 +668,25 @@ export async function startServer(listenPort = PORT): Promise<{
     const { otp } = req.body as { otp?: string };
     const trip = await getTrip(sql, id);
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
-    if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {
-      fail(403, "FORBIDDEN", "not your trip");
-    }
-    if (trip.state === "ONGOING") {
-      return { state: "ONGOING" };
-    }
+    if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
+    if (trip.state === "ONGOING") return { state: "ONGOING" };
     if (!(await verifyStartOtp(sql, id, otp ?? ""))) fail(401, "BAD_OTP", "wrong OTP");
     const updated = await transitionTrip(sql, id, "ONGOING");
     pushRider(updated.rider_id, { t: "trip.state", state: "ONGOING" });
-    pushDriver(sess.userId, { t: "trip.state", state: "ONGOING", tripId: updated.id });
+    pushDriver(updated.driver_id, { t: "trip.state", state: "ONGOING", tripId: updated.id });
     return { state: updated.state };
   });
 
   app.post("/v1/trips/:id/complete", async (req) => {
     const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
-    const { tipPaise } = req.body as { tipPaise?: number };
-
     const trip0 = await getTrip(sql, id);
     if (!trip0) fail(404, "NOT_FOUND", "no such trip");
     if (trip0.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
-
-    if (trip0.state === "COMPLETED") {
-      return { state: "COMPLETED", duplicate: true };
-    }
-
+    if (trip0.state === "COMPLETED") return { state: "COMPLETED", duplicate: true };
     try {
       await transitionTrip(sql, id, "COMPLETED");
-      const settlement = await settleTrip(sql, id, tipPaise ?? 0);
-
+      const settlement = await settleTrip(sql, id, 0);
       const trip = (await getTrip(sql, id))!;
       const live = getLiveDriver(sess.userId);
       if (live) live.onTrip = false;
@@ -669,6 +697,58 @@ export async function startServer(listenPort = PORT): Promise<{
       if (err instanceof TripError) fail(409, err.code, err.message);
       throw err;
     }
+  });
+
+  app.post("/v1/trips/:id/tip", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    const { amountPaise } = req.body as { amountPaise?: number };
+    if (!Number.isSafeInteger(amountPaise) || amountPaise! < 100 || amountPaise! > 100_000) {
+      fail(400, "INVALID_TIP", "tip must be between ₹1 and ₹1,000");
+    }
+    const trip = await getTrip(sql, id);
+    if (!trip) fail(404, "NOT_FOUND", "no such trip");
+    if (trip.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
+    if (trip.state !== "COMPLETED") fail(409, "NOT_COMPLETED", "tip after trip completion");
+    const prior = await sql.query<{ amount_paise: number }>(
+      "SELECT amount_paise FROM journal_entries WHERE trip_id=$1 AND reason='TIP' LIMIT 1",
+      [id],
+    );
+    if (prior.rows[0]) {
+      if (Number(prior.rows[0].amount_paise) !== amountPaise) fail(409, "TIP_ALREADY_SET", "tip was already submitted");
+      return { ok: true, duplicate: true };
+    }
+    const source = trip.payment_method === "WALLET" ? `user:${sess.userId}:WALLET` : "pg:CLEARING";
+    if (trip.payment_method === "WALLET" && (await walletBalance(sql, source)) < amountPaise!) {
+      fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this tip");
+    }
+    const txn = await postTransaction(
+      sql,
+      [{ debitAccount: source, creditAccount: `driver:${trip.driver_id}:WALLET`, amountPaise: amountPaise!, reason: "TIP" }],
+      id,
+      `tip:${id}`,
+    );
+    const fare = readFareJson(trip.fare_json);
+    fare.tipPaise = amountPaise!;
+    await sql.query("UPDATE trips SET fare_json=$2 WHERE id=$1", [id, JSON.stringify(fare)]);
+    return { ok: true, txnId: txn.txnId, duplicate: txn.duplicate };
+  });
+
+  app.post("/v1/trips/:id/cancel-rider", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    const trip = await getTrip(sql, id);
+    if (!trip) fail(404, "NOT_FOUND", "no such trip");
+    if (trip.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
+    if (trip.state === "CANCELLED_RIDER") return { state: trip.state, duplicate: true };
+    if (!["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state)) {
+      fail(409, "NOT_CANCELLABLE", "trip can only be cancelled before it starts");
+    }
+    const updated = await transitionTrip(sql, id, "CANCELLED_RIDER");
+    const live = getLiveDriver(updated.driver_id);
+    if (live) live.onTrip = false;
+    pushDriver(updated.driver_id, { t: "trip.state", state: "CANCELLED_RIDER", tripId: id });
+    return { state: updated.state, duplicate: false };
   });
 
   app.get("/v1/trips/:id", async (req) => {
@@ -683,14 +763,13 @@ export async function startServer(listenPort = PORT): Promise<{
   });
 
   app.post("/v1/trips/:id/regenerate-otp", async (req) => {
-    const sess = requireAuth(await session(req));
+    const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
     const trip = await getTrip(sql, id);
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
     if (trip.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
     try {
-      const newOtp = await regenerateTripOtp(sql, id);
-      return { otp: newOtp };
+      return { otp: await regenerateTripOtp(sql, id) };
     } catch (err) {
       if (err instanceof TripError) fail(409, err.code, err.message);
       throw err;
@@ -709,6 +788,9 @@ export async function startServer(listenPort = PORT): Promise<{
       pickup: { lat: trip.pickup_lat, lng: trip.pickup_lng },
       drop: { lat: trip.drop_lat, lng: trip.drop_lng },
       fareBreakdown: fare,
+      paymentMethod: trip.payment_method ?? "UPI",
+      startedAt: trip.started_at ? new Date(trip.started_at).toISOString() : undefined,
+      endedAt: trip.ended_at ? new Date(trip.ended_at).toISOString() : undefined,
       driverName: driver?.name ?? "",
       driverPlate: driver?.plate ?? "",
       driverRating: driver?.rating ?? 4.8,
@@ -935,6 +1017,14 @@ export async function startServer(listenPort = PORT): Promise<{
          VALUES ($1,$2,$3,$4,$5,$6)`,
         [randomUUID(), id, sess.userId, rateeId, Math.round(stars), comment ?? null],
       );
+      const average = await sql.query<{ avg: string }>(
+        "SELECT AVG(stars)::text AS avg FROM ratings WHERE ratee_id=$1",
+        [rateeId],
+      );
+      await sql.query("UPDATE users SET rating_rolling=$2 WHERE id=$1", [
+        rateeId,
+        Number(average.rows[0]?.avg ?? stars).toFixed(2),
+      ]);
     } catch {
       fail(409, "ALREADY_RATED", "already rated this trip");
     }
@@ -989,7 +1079,9 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = requireAuth(await session(req));
     const col = sess.role === "RIDER" ? "rider_id" : "driver_id";
     const rows = await sql.query<TripRow & Record<string, unknown>>(
-      `SELECT * FROM trips WHERE ${col}=$1 ORDER BY id DESC LIMIT 50`,
+      `SELECT t.*, r.payment_method FROM trips t
+       JOIN ride_requests r ON r.id=t.request_id
+       WHERE t.${col}=$1 ORDER BY r.created_at DESC LIMIT 50`,
       [sess.userId],
     );
     return { trips: rows.rows.map(tripView) };
@@ -998,19 +1090,72 @@ export async function startServer(listenPort = PORT): Promise<{
   app.get("/v1/driver/me", async (req) => {
     const sess = requireDriver(await session(req));
     const profile = (
-      await sql.query<{ vehicle_class: string; plate: string; kyc_status: string; online: boolean }>(
-        "SELECT vehicle_class, plate, kyc_status, online FROM driver_profiles WHERE user_id=$1",
+      await sql.query<{ vehicle_class: string; plate: string; kyc_status: string; online: boolean; rating: string | null }>(
+        `SELECT d.vehicle_class, d.plate, d.kyc_status, d.online, u.rating_rolling AS rating
+         FROM driver_profiles d JOIN users u ON u.id=d.user_id WHERE d.user_id=$1`,
         [sess.userId],
       )
     ).rows[0];
-    const balance = await walletBalance(sql, `driver:${sess.userId}:WALLET`);
-    const completed = await sql.query<{ n: string }>(
-      "SELECT COUNT(*) AS n FROM trips WHERE driver_id=$1 AND state='COMPLETED'",
-      [sess.userId],
+    const account = `driver:${sess.userId}:WALLET`;
+    const balance = await walletBalance(sql, account);
+    const stats = await sql.query<{ completed: string; today: string; week: string; cash: string; digital: string }>(
+      `SELECT
+         COUNT(DISTINCT t.id)::text AS completed,
+         COALESCE(SUM(CASE WHEN j.created_at >= date_trunc('day',now()) THEN j.amount_paise ELSE 0 END),0)::text AS today,
+         COALESCE(SUM(CASE WHEN j.created_at >= now()-interval '7 days' THEN j.amount_paise ELSE 0 END),0)::text AS week,
+         COALESCE(SUM(CASE WHEN r.payment_method='CASH' THEN j.amount_paise ELSE 0 END),0)::text AS cash,
+         COALESCE(SUM(CASE WHEN r.payment_method<>'CASH' THEN j.amount_paise ELSE 0 END),0)::text AS digital
+       FROM trips t
+       LEFT JOIN ride_requests r ON r.id=t.request_id
+       LEFT JOIN journal_entries j ON j.trip_id=t.id AND j.credit_account=$2 AND j.reason IN ('RIDE_FARE','TIP','INCENTIVE')
+       WHERE t.driver_id=$1 AND t.state='COMPLETED'`,
+      [sess.userId, account],
     );
-    return { profile: profile ?? null, walletBalancePaise: balance, completedTrips: Number(completed.rows[0]?.n ?? 0) };
+    const s = stats.rows[0];
+    return {
+      profile: profile ?? null,
+      rating: Number(profile?.rating ?? 5),
+      walletBalancePaise: balance,
+      completedTrips: Number(s?.completed ?? 0),
+      todayEarningsPaise: Number(s?.today ?? 0),
+      weekEarningsPaise: Number(s?.week ?? 0),
+      cashEarningsPaise: Number(s?.cash ?? 0),
+      digitalEarningsPaise: Number(s?.digital ?? 0),
+    };
   });
 
+  app.post("/v1/driver/payout", async (req) => {
+    const sess = requireDriver(await session(req));
+    const { amountPaise } = req.body as { amountPaise?: number };
+    if (!Number.isSafeInteger(amountPaise) || amountPaise! < 20_000) fail(400, "INVALID_PAYOUT", "minimum payout is ₹200");
+    const account = `driver:${sess.userId}:WALLET`;
+    const balance = await walletBalance(sql, account);
+    if (balance < amountPaise!) fail(409, "INSUFFICIENT_BALANCE", "payout exceeds wallet balance");
+    const txn = await postTransaction(
+      sql,
+      [{ debitAccount: account, creditAccount: `external:BANK:${sess.userId}`, amountPaise: amountPaise!, reason: "PAYOUT" }],
+      null,
+      `payout:${sess.userId}:${randomUUID()}`,
+    );
+    return { ok: true, txnId: txn.txnId, balancePaise: await walletBalance(sql, account) };
+  });
+
+  app.post("/v1/driver/onboarding", async (req) => {
+    const sess = requireDriver(await session(req));
+    const { plate } = req.body as { plate?: string };
+    const clean = plate?.trim().toUpperCase();
+    if (!clean || clean.length < 6 || clean.length > 15) fail(400, "INVALID_PLATE", "enter a valid vehicle plate");
+    await sql.query("UPDATE driver_profiles SET plate=$2, kyc_status='IN_REVIEW' WHERE user_id=$1", [sess.userId, clean]);
+    return { ok: true, status: "IN_REVIEW" };
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    app.post("/v1/driver/onboarding/dev-approve", async (req) => {
+      const sess = requireDriver(await session(req));
+      await sql.query("UPDATE driver_profiles SET kyc_status='APPROVED' WHERE user_id=$1", [sess.userId]);
+      return { ok: true, status: "APPROVED" };
+    });
+  }
   app.setErrorHandler((err: unknown, req, reply) => {
     const errObj = typeof err === "object" && err !== null ? err : {};
     const status = "statusCode" in errObj && typeof errObj.statusCode === "number" ? errObj.statusCode : 500;
@@ -1058,8 +1203,21 @@ export async function startServer(listenPort = PORT): Promise<{
 
 const isMain = process.argv.some((arg) => arg.replace(/\\/g, "/").endsWith("server.ts") || arg.replace(/\\/g, "/").endsWith("server.js"));
 if (isMain) {
-  startServer().catch((err: unknown) => {
-    console.error("[core] fatal", err);
-    process.exit(1);
-  });
+  startServer()
+    .then((handle) => {
+      let closing = false;
+      const shutdown = async (signal: string) => {
+        if (closing) return;
+        closing = true;
+        logger.info("SHUTDOWN", `Received ${signal}; draining server`);
+        await handle.close();
+        process.exit(0);
+      };
+      process.once("SIGTERM", () => void shutdown("SIGTERM"));
+      process.once("SIGINT", () => void shutdown("SIGINT"));
+    })
+    .catch((err: unknown) => {
+      console.error("[core] fatal", err);
+      process.exit(1);
+    });
 }

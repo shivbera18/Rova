@@ -81,13 +81,7 @@ export async function upsertUser(
   return { id };
 }
 
-
-/**
- * Password login per plan §7.1 (web-first variant):
- *  - First call for a phone REGISTERS the password (scrypt hash).
- *  - Subsequent calls VERIFY it.
- * Hash stored in users.password_hash: scrypt$<saltHex>$<hashHex>
- */
+/** Password authentication is only enabled after the phone was verified by OTP. */
 export async function upsertUserWithPassword(
   sql: SqlRowClient,
   phone: string,
@@ -100,26 +94,14 @@ export async function upsertUserWithPassword(
     [bidx],
   );
   if (existing.rows.length === 0) {
-    const created = await upsertUser(sql, phone, role, "Chalo user");
-    const { saltHex, hashHex } = hashPassword(password);
-    await sql.query("UPDATE users SET password_hash = $2 WHERE id = $1", [
-      created.id,
-      `scrypt$${saltHex}$${hashHex}`,
-    ]);
-    return { id: created.id, isNew: true };
+    throw new AuthError("OTP_REQUIRED", "Verify this phone with OTP before creating a password");
   }
   const row = existing.rows[0]!;
   if (row.role !== role) {
     throw new AuthError("ROLE_MISMATCH", `Phone number is already registered as a ${row.role.toLowerCase()}`);
   }
   if (!row.password_hash) {
-    // account exists via OTP but has no password yet — register this one
-    const { saltHex, hashHex } = hashPassword(password);
-    await sql.query("UPDATE users SET password_hash = $2 WHERE id = $1", [
-      row.id,
-      `scrypt$${saltHex}$${hashHex}`,
-    ]);
-    return { id: row.id, isNew: true };
+    throw new AuthError("PASSWORD_NOT_SET", "Sign in with OTP once and create a password");
   }
   if (!verifyPassword(password, row.password_hash)) {
     throw new AuthError("BAD_PASSWORD", "Incorrect password for this phone number");
@@ -127,6 +109,11 @@ export async function upsertUserWithPassword(
   return { id: row.id, isNew: false };
 }
 
+export async function setUserPassword(sql: SqlRowClient, userId: string, password: string): Promise<void> {
+  if (password.length < 4) throw new AuthError("WEAK_PASSWORD", "password must be at least 4 characters");
+  const { saltHex, hashHex } = hashPassword(password);
+  await sql.query("UPDATE users SET password_hash=$2 WHERE id=$1", [userId, `scrypt$${saltHex}$${hashHex}`]);
+}
 function hashPassword(password: string): { saltHex: string; hashHex: string } {
   const salt = randomBytes(16);
   const hash = scryptSync(password, salt, 32);

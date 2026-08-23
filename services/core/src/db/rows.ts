@@ -102,6 +102,7 @@ export interface TripRow {
   started_at: Date | null;
   ended_at: Date | null;
   version: number;
+  payment_method?: "WALLET" | "UPI" | "CASH";
 }
 
 export type LedgerReason =

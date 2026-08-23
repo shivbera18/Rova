@@ -531,9 +531,19 @@ async function runVerification(): Promise<void> {
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVED" }, driverToken);
     const regenRes = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);
     assert(regenRes.status === 200 && !!regenRes.json.otp, "Rider retrieved start OTP via secure regenerate-otp endpoint");
+
     await api(`/v1/trips/${tripId}/start`, { otp: regenRes.json.otp }, riderToken);
     await api(`/v1/trips/${tripId}/complete`, {}, driverToken);
 
+    const tipRes = await api(`/v1/trips/${tripId}/tip`, { amountPaise: 1500 }, riderToken);
+    assert(tipRes.status === 200 && tipRes.json.ok, "Rider tip posts after completion");
+    const duplicateTip = await api(`/v1/trips/${tripId}/tip`, { amountPaise: 1500 }, riderToken);
+    assert(duplicateTip.status === 200 && duplicateTip.json.duplicate, "Rider tip is idempotent");
+
+    const receipt = await api(`/v1/trips/${tripId}`, undefined, riderToken);
+    assert(receipt.json.paymentMethod === "UPI", "Receipt exposes payment method");
+    assert(!!receipt.json.startedAt && !!receipt.json.endedAt, "Receipt exposes trip timestamps");
+    assert(receipt.json.fareBreakdown.tipPaise === 1500, "Receipt includes submitted tip");
     const rateRes = await api(`/v1/trips/${tripId}/rate`, { stars: 5, comment: "Great ride!" }, riderToken);
     assert(rateRes.status === 200 && rateRes.json.ok === true, "Rider submitted 5-star rating with comment");
 
@@ -546,6 +556,38 @@ async function runVerification(): Promise<void> {
     assert(meRes.status === 200, "Driver summary endpoint /v1/driver/me returns 200");
     assert(meRes.json.completedTrips > 0, "Driver completed trips count incremented");
     assert(meRes.json.walletBalancePaise > 0, "Driver wallet balance reflects earnings from completed trips");
+    assert(meRes.json.rating >= 5, "Driver summary exposes computed rolling rating");
+    assert(meRes.json.todayEarningsPaise > 0 && meRes.json.weekEarningsPaise > 0, "Driver summary exposes today and week earnings");
+    assert(meRes.json.digitalEarningsPaise > 0, "Driver summary exposes payment-method split");
+    if (meRes.json.walletBalancePaise >= 20_000) {
+      const payout = await api("/v1/driver/payout", { amountPaise: 20_000 }, driverToken);
+      assert(payout.status === 200 && payout.json.balancePaise < meRes.json.walletBalancePaise, "Driver can withdraw available earnings");
+    }
+  }
+
+  console.log("\n  [Scenario L] Wallet Top-up & Booking Guard");
+  {
+    const before = await api("/v1/wallet/me", undefined, riderToken);
+    const topped = await api("/v1/wallet/topup", { amountPaise: 10_000 }, riderToken);
+    assert(topped.status === 200 && topped.json.balancePaise === before.json.balancePaise + 10_000, "Rider wallet top-up updates balance");
+  }
+
+  console.log("\n  [Scenario M] Matched Rider Cancellation");
+  {
+    const quotesRes = await api("/v1/quotes", { pickup, drop }, riderToken);
+    const bikeQuote = quotesRes.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+    const offerWaiter = driverWs.waitFor((m) => m.t === "dispatch.offer");
+    const reqRes = await api("/v1/requests", {
+      quoteToken: bikeQuote.quoteToken,
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+    }, riderToken);
+    await offerWaiter;
+    const accepted = await api(`/v1/requests/${reqRes.json.sessionId}/accept`, {}, driverToken);
+    const cancelled = await api(`/v1/trips/${accepted.json.tripId}/cancel-rider`, {}, riderToken);
+    assert(cancelled.status === 200 && cancelled.json.state === "CANCELLED_RIDER", "Rider can cancel after driver assignment before start");
   }
 
   // --- Scenario I: Role Mismatch & Driver KYC Gate ---
@@ -568,6 +610,14 @@ async function runVerification(): Promise<void> {
     assert(registration.status === 200 && !!registration.json.token, "New driver registers with one selected vehicle");
     const profile = await api("/v1/driver/me", undefined, registration.json.token);
     assert(profile.json.profile.vehicle_class === "AUTO", "Driver profile stores selected vehicle as AUTO");
+    assert(profile.json.profile.kyc_status === "PENDING_DOCS", "New driver starts in document onboarding");
+    const submitted = await api("/v1/driver/onboarding", { plate: "KA01AB1234" }, registration.json.token);
+    assert(submitted.status === 200 && submitted.json.status === "IN_REVIEW", "Driver submits vehicle documents for review");
+    const approved = await api("/v1/driver/onboarding/dev-approve", {}, registration.json.token);
+    assert(approved.status === 200 && approved.json.status === "APPROVED", "Pilot onboarding can complete approval flow");
+    await api("/v1/driver/status", { online: true }, registration.json.token);
+    const persisted = await api("/v1/driver/me", undefined, registration.json.token);
+    assert(persisted.json.profile.online === true, "Driver online state persists across profile reload");
     const change = await api("/v1/driver/status", { vehicleClass: "BIKE" }, registration.json.token);
     assert(change.status === 409 && change.json.code === "VEHICLE_IMMUTABLE", "Driver cannot switch to a second vehicle in console");
   }

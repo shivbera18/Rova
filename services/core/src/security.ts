@@ -30,7 +30,7 @@ export async function validateRideRequest(
   riderId: string,
   body: { offerPaise?: number; platformFeePaise?: number; pickup: LatLon; drop: LatLon },
 ): Promise<void> {
-  enforceRateLimit(`ride:${riderId}`, 8, 60_000);
+  enforceRateLimit(`ride:${riderId}`, 12, 60_000);
   if (body.offerPaise !== undefined && body.offerPaise > 10_000_000) {
     throw new SecurityError(400, "OFFER_TOO_HIGH", "Driver offer exceeds ₹1,00,000 fraud limit");
   }

@@ -115,7 +115,11 @@ export async function createTripFromAgreement(
 }
 
 export async function getTrip(sql: SqlRowClient, tripId: string): Promise<TripRow | null> {
-  const r = await sql.query<TripRow>("SELECT * FROM trips WHERE id = $1", [tripId]);
+  const r = await sql.query<TripRow>(
+    `SELECT t.*, r.payment_method FROM trips t
+     JOIN ride_requests r ON r.id=t.request_id WHERE t.id=$1`,
+    [tripId],
+  );
   return r.rows[0] ?? null;
 }
 

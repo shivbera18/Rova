@@ -5,19 +5,23 @@ import type { RequestSessionView, Quote } from "../api";
 import { createRequest } from "../api";
 
 export const EXPLAINER_COPY =
-  "You can offer any amount — even ₹0. But this small fee keeps Chalo-X running: servers, support and fair dispatch for every driver.";
+  "You can offer any amount — even ₹0. But this small fee keeps Chalo-X running: servers, support, insurance and fair dispatch.";
 
-const VEHICLE_LABEL: Record<string, string> = {
-  BIKE_LITE: "Bike Lite",
-  BIKE: "Bike",
-  AUTO: "Auto",
-  CAB_MINI: "Cab Mini",
-  CAB_PRIME: "Cab Prime",
-  CAB_XL: "Cab XL",
+const VEHICLE_META: Record<string, { label: string; icon: string; seats: string }> = {
+  BIKE_LITE: { label: "Bike Lite", icon: "🛵", seats: "1 seat" },
+  BIKE: { label: "Bike", icon: "🏍️", seats: "1 seat" },
+  AUTO: { label: "Auto", icon: "🛺", seats: "3 seats" },
+  CAB_MINI: { label: "Cab Mini", icon: "🚗", seats: "4 seats" },
+  CAB_PRIME: { label: "Cab Prime", icon: "🚘", seats: "4 seats · Sedan" },
+  CAB_XL: { label: "Cab XL", icon: "🚙", seats: "6 seats · SUV" },
 };
 
 export function vehicleLabel(vc: string): string {
-  return VEHICLE_LABEL[vc] ?? vc;
+  return VEHICLE_META[vc]?.label ?? vc;
+}
+
+export function vehicleIcon(vc: string): string {
+  return VEHICLE_META[vc]?.icon ?? "🚗";
 }
 
 /** Fee preview for an arbitrary rider offer, anchored to the list-price quote's fee. */
@@ -47,14 +51,15 @@ export default function OfferSheet({
   onBooked: (session: RequestSessionView) => void;
 }): React.ReactElement {
   const [rupeesInput, setRupeesInput] = useState<string>((quote.softFloor / 100).toFixed(0));
-  const [chip, setChip] = useState<"soft" | "list">("soft");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const customRupees = Number(rupeesInput);
   const offerValid = Number.isFinite(customRupees) && customRupees >= 0;
-  const offerPaise = chip === "list" ? quote.listPrice : Math.round(customRupees * 100);
+  const offerPaise = Math.round(customRupees * 100);
   const totalPreview = riderTotalPreview(offerPaise, quote);
+  const savingsVsList = quote.listPrice - totalPreview;
+  const meta = VEHICLE_META[quote.vehicleClass] ?? { label: quote.vehicleClass, icon: "🚗", seats: "4 seats" };
 
   async function submit(negotiate: boolean): Promise<void> {
     setBusy(true);
@@ -75,17 +80,25 @@ export default function OfferSheet({
     }
   }
 
+  const listRupees = quote.listPrice / 100;
+
   return (
     <div className="card panel-card">
-      <div className="spread">
-        <strong>{vehicleLabel(quote.vehicleClass)}</strong>
-        <button className="btn-ghost" onClick={onClose} aria-label="Close">
+      <div className="spread" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 22 }}>{meta.icon}</span>
+          <div>
+            <strong style={{ fontSize: 16 }}>{meta.label}</strong>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>{meta.seats} · {quote.distanceKm} km · ~{quote.etaMin} min away</div>
+          </div>
+        </div>
+        <button className="btn-ghost" style={{ padding: "6px 10px" }} onClick={onClose} aria-label="Close">
           ✕
         </button>
       </div>
-      <div className="fee-line">
-        {quote.distanceKm} km · ~{quote.etaMin} min away ·{" "}
-        <span style={{ color: "var(--text)" }}>{formatINR(paisa(quote.listPrice))}</span> list
+
+      <div className="fee-line" style={{ marginTop: 12 }}>
+        <span>Standard List: <strong>{formatINR(paisa(quote.listPrice))}</strong></span>
         <i className="info-dot" tabIndex={0}>
           ℹ
           <span className="info-tip">{EXPLAINER_COPY}</span>
@@ -93,49 +106,104 @@ export default function OfferSheet({
       </div>
 
       <div className="step-label" style={{ marginTop: 14 }}>
-        Your offer
+        Select or Enter Your Offer (Down to ₹0):
       </div>
-      <div className="row" style={{ flexWrap: "wrap" }}>
-        <button className={`chip ${chip === "soft" ? "selected" : ""}`} onClick={() => setChip("soft")}>
-          Soft floor {formatINR(paisa(quote.softFloor))}
+
+      {/* Quick discount buttons */}
+      <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+        <button
+          type="button"
+          className={`chip ${rupeesInput === Math.round(listRupees * 0.9).toString() ? "selected" : ""}`}
+          onClick={() => setRupeesInput(Math.round(listRupees * 0.9).toString())}
+        >
+          -10% (₹{Math.round(listRupees * 0.9)})
         </button>
-        <button className={`chip ${chip === "list" ? "selected" : ""}`} onClick={() => setChip("list")}>
-          List price ✓
+        <button
+          type="button"
+          className={`chip ${rupeesInput === Math.round(listRupees * 0.75).toString() ? "selected" : ""}`}
+          onClick={() => setRupeesInput(Math.round(listRupees * 0.75).toString())}
+        >
+          -25% (₹{Math.round(listRupees * 0.75)})
+        </button>
+        <button
+          type="button"
+          className={`chip ${rupeesInput === Math.round(listRupees * 0.5).toString() ? "selected" : ""}`}
+          onClick={() => setRupeesInput(Math.round(listRupees * 0.5).toString())}
+        >
+          -50% (₹{Math.round(listRupees * 0.5)})
+        </button>
+        <button
+          type="button"
+          className={`chip ${rupeesInput === "0" ? "selected" : ""}`}
+          onClick={() => setRupeesInput("0")}
+        >
+          🎁 ₹0 (Free)
+        </button>
+        <button
+          type="button"
+          className={`chip ${rupeesInput === listRupees.toString() ? "selected" : ""}`}
+          onClick={() => setRupeesInput(listRupees.toString())}
+        >
+          List (₹{listRupees})
         </button>
       </div>
-      <div className="row" style={{ marginTop: 10 }}>
-        <span style={{ fontWeight: 700 }}>₹</span>
+
+      {/* Direct Rupee Input */}
+      <div className="row" style={{ marginTop: 6 }}>
+        <span style={{ fontWeight: 800, fontSize: 18, color: "var(--accent-light)" }}>₹</span>
         <input
           inputMode="decimal"
           value={rupeesInput}
-          onChange={(e) => {
-            setChip("soft");
-            setRupeesInput(e.target.value.replace(/[^0-9.]/g, ""));
-          }}
+          onChange={(e) => setRupeesInput(e.target.value.replace(/[^0-9.]/g, ""))}
           aria-label="Offer amount in rupees"
+          placeholder="0"
+          style={{ fontSize: 18, fontWeight: 800 }}
         />
       </div>
-      <p className="muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
-        Your offer goes to the driver in full — the platform fee is charged separately on top.
-        You'd pay about <strong>{formatINR(paisa(totalPreview))}</strong> including the fee.
-      </p>
+
+      <div className="fare-box" style={{ marginTop: 12, padding: "10px 12px" }}>
+        <div className="fare-line">
+          <span>Driver Take-Home</span>
+          <span style={{ color: "var(--accent-light)", fontWeight: 700 }}>{formatINR(paisa(offerPaise))}</span>
+        </div>
+        <div className="fare-line muted">
+          <span>
+            Platform Fee (Keeps Lights On){" "}
+            <i className="info-dot" tabIndex={0}>
+              ℹ
+              <span className="info-tip">{EXPLAINER_COPY}</span>
+            </i>
+          </span>
+          <span>{formatINR(paisa(quote.platformFeePaise))}</span>
+        </div>
+        <div className="fare-line fare-total">
+          <span>You Pay Total</span>
+          <span style={{ color: "#fff", fontWeight: 800 }}>{formatINR(paisa(totalPreview))}</span>
+        </div>
+        {savingsVsList > 0 && (
+          <div className="ok-text">
+            ✓ You save {formatINR(paisa(savingsVsList))} vs list price!
+          </div>
+        )}
+      </div>
 
       {error && (
         <div className="error-text" style={{ marginTop: 10 }}>
           {error}
         </div>
       )}
+
       <div className="row" style={{ marginTop: 14 }}>
         <button
           className="btn-primary"
           style={{ flex: 1 }}
-          disabled={busy || (chip !== "list" && !offerValid)}
+          disabled={busy || !offerValid}
           onClick={() => void submit(true)}
         >
-          Offer {formatINR(paisa(offerPaise))} & negotiate
+          Offer {formatINR(paisa(offerPaise))} & Negotiate
         </button>
         <button className="btn-ghost" disabled={busy} onClick={() => void submit(false)}>
-          Book at list
+          Book at List
         </button>
       </div>
     </div>

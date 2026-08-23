@@ -31,6 +31,7 @@ export function readFareJson(raw: unknown): TripFare {
 }
 
 export class TripError extends Error {
+  public statusCode = 409;
   constructor(
     public code: string,
     message: string,

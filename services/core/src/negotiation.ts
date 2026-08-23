@@ -12,6 +12,7 @@ import type { SqlRowClient } from "./types.ts";
 import type { NegotiationRow } from "./db/rows.ts";
 
 export class NegotationError extends Error {
+  public statusCode = 409;
   constructor(
     public code: string,
     message: string,

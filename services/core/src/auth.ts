@@ -15,6 +15,7 @@ const bidxKey = createHash("sha256").update(process.env.JWT_SECRET ?? "dev-only-
 export const DEV_OTP = "123456";
 
 export class AuthError extends Error {
+  public statusCode = 400;
   constructor(
     public code: string,
     message: string,

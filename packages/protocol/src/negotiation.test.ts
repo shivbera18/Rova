@@ -20,7 +20,7 @@ describe("negotiation FSM", () => {
   it("terminal states are terminal", () => {
     for (const s of ["AGREED", "EXPIRED", "DECLINED", "CANCELLED"] as const) {
       for (const a of ["DRIVER_ACCEPT", "DRIVER_COUNTER", "RIDER_ACCEPT", "RIDER_FINAL", "RIDER_DECLINE", "RIDER_CANCEL", "EXPIRE"]) {
-        if (!(s === "BROADCASTING")) assert.equal(canTransition(s, a) === s ? false : true, true);
+        assert.equal(canTransition(s, a), null);
       }
     }
   });

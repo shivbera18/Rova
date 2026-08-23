@@ -203,7 +203,7 @@ export async function settleTrip(
     ? (pm.rows[0]!.payment_method as "WALLET" | "UPI" | "CASH")
     : "UPI";
 
-  const lines = settlementLines({
+  const allLines = settlementLines({
     riderId: trip.rider_id,
     driverId: trip.driver_id,
     agreedPaise: fare.agreedPaise,
@@ -211,6 +211,13 @@ export async function settleTrip(
     tipPaise,
     paymentMethod: method,
   });
+  // ₹0 negotiated rides ("negotiate to zero" is the product headline) legitimately
+  // produce no postable journal lines — skip settlement rather than failing
+  // NONPOSITIVE_AMOUNT/EMPTY_TXN and leaving the trip stuck unsettled.
+  const lines = allLines.filter((l) => l.amountPaise > 0);
+  if (lines.length === 0) {
+    return { txnId: `settle:${tripId}:zero`, duplicate: false, fareJson: { ...fare, tipPaise } };
+  }
   const { txnId, duplicate } = await postTransaction(sql, lines, tripId, `settle:${tripId}`);
   return { txnId, duplicate, fareJson: { ...fare, tipPaise } };
 }

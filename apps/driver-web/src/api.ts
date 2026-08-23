@@ -46,6 +46,8 @@ export const api = {
     call<{ sent: boolean; devHint?: string }>("/v1/auth/otp/send", "POST", { phone }),
   verifyOtp: (phone: string, otp: string) =>
     call<AuthSession>("/v1/auth/otp/verify", "POST", { phone, otp, role: "DRIVER" }),
+  passwordLogin: (phone: string, password: string, role: "DRIVER" | "RIDER") =>
+    call<AuthSession>("/v1/auth/login/password", "POST", { phone, password, role }),
   driverMe: () =>
     call<{
       profile: { vehicle_class: string; plate: string; kyc_status: string; online: boolean } | null;

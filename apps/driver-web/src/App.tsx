@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { formatINR, paisa, type LatLon } from "@chalo/protocol";
 import { connectDriverSocket, getToken, api, type DriverSocket, type Offer } from "./api";
-import { Login } from "./Login";
+import { Login, DriverLanding } from "./Login";
 import { MapView, type MapStops } from "./MapView";
 import { OfferCard, type OfferEntry } from "./OfferCard";
 import { TripPanel } from "./TripPanel";
@@ -17,6 +17,7 @@ const HOTSPOTS: Array<{ name: string; pos: LatLon }> = [
   { name: "📍 HSR Layout", pos: { lat: 12.9116, lng: 77.6474 } },
   { name: "📍 Airport", pos: { lat: 13.1986, lng: 77.7066 } },
 ];
+
 const VEHICLES = [
   { id: "ALL", label: "⚡ ALL (Dev Mode)" },
   { id: "BIKE", label: "🏍️ Bike" },
@@ -36,6 +37,7 @@ function Console() {
   const [myPos, setMyPos] = useState<LatLon>({ lat: 12.9352, lng: 77.6245 });
   const [activeVehicle, setActiveVehicle] = useState("ALL");
   const [me, setMe] = useState<DriverMe | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
 
   const onlineRef = useRef(online);
   onlineRef.current = online;
@@ -48,13 +50,17 @@ function Console() {
       .driverMe()
       .then((data) => {
         setMe(data);
+        setSessionReady(true);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // api.ts purges stale tokens and dispatches "storage" on 401/403.
+        // App owns the redirect; Console renders nothing while it happens.
+        setSessionReady(false);
+      });
   }, []);
 
   useEffect(loadMe, [loadMe]);
 
-  // Sync online & vehicle class with backend
   const updateDriverStatus = useCallback(async (isOnline: boolean, vc: string, pos?: LatLon) => {
     try {
       await api.updateStatus({
@@ -66,20 +72,20 @@ function Console() {
     } catch {}
   }, []);
 
-  // WS connection per online session
   const [wsSession, setWsSession] = useState(0);
   useEffect(() => {
+    if (!sessionReady) return;
     if (online) {
       setWsSession((s) => s + 1);
       void updateDriverStatus(true, activeVehicle, myPos);
     } else {
       void updateDriverStatus(false, activeVehicle, myPos);
     }
-  }, [online, activeVehicle]);
+  }, [online, activeVehicle, sessionReady]);
 
   useEffect(() => {
     const token = getToken();
-    if (!token || wsSession === 0) return;
+    if (!token || wsSession === 0 || !sessionReady) return;
     const sock = connectDriverSocket(
       token,
       (msg) => {
@@ -89,7 +95,7 @@ function Console() {
           setOffers((prev) =>
             prev.some((e) => e.offer.requestId === o.requestId && e.offer.negotiationId === o.negotiationId)
               ? prev
-              : [...prev, { offer: o, ttlMs: Math.max(1000, new Date(o.expiresAt).getTime() - Date.now()) }],
+              : [...prev, { offer: o, ttlMs: Math.max(15000, new Date(o.expiresAt).getTime() - Date.now()) }],
           );
         } else if (msg.t === "dispatch.cancel") {
           setOffers((prev) => prev.filter((e) => e.offer.requestId !== msg.requestId));
@@ -121,9 +127,8 @@ function Console() {
       sockRef.current = null;
       setConnected(false);
     };
-  }, [wsSession]);
+  }, [wsSession, sessionReady]);
 
-  // Periodic position updates over WS while online
   useEffect(() => {
     const send = (): void => {
       const pos = posRef.current;
@@ -170,6 +175,8 @@ function Console() {
     void api.driverMe().then(setMe).catch(() => undefined);
   }
 
+  if (!sessionReady) return null;
+
   const stops: MapStops = {};
   const top = offers.length > 0 ? offers[0] : undefined;
   if (!tripId && top) {
@@ -178,32 +185,30 @@ function Console() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <header className="topbar">
         <div className="brand">
-          Chalo-X<span className="x"> Driver</span>
-          <span className="badge">Console</span>
+          CHALO-X <span style={{ color: "var(--blue)" }}>DRIVER</span>
+          <span className="brut-badge brut-badge-green" style={{ marginLeft: 8 }}>CONSOLE</span>
         </div>
-        <span className={"conn-dot" + (connected ? " ok" : "")} title={connected ? "WebSocket Connected" : "Connecting..."} />
+        <span className={"conn-dot" + (connected ? " ok" : "")} title={connected ? "Connected" : "Disconnected"} />
 
         <div className="vehicle-selector">
-          <span style={{ fontSize: 12 }}>Vehicle:</span>
-          <select value={activeVehicle} onChange={(e) => handleVehicleChange(e.target.value)}>
+          <span style={{ fontSize: 12, fontWeight: 800 }}>VEHICLE</span>
+          <select className="brut-select" style={{ width: "auto", padding: "6px 10px" }} value={activeVehicle} onChange={(e) => handleVehicleChange(e.target.value)}>
             {VEHICLES.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
+              <option key={v.id} value={v.id}>{v.label}</option>
             ))}
           </select>
         </div>
 
-        <div className="spacer" />
+        <div style={{ flex: 1 }} />
 
-        <div className={"toggle-wrap" + (online ? " online" : "")} onClick={() => setOnline((v) => !v)}>
+        <div className={`toggle-wrap${online ? " online" : ""}`} onClick={() => setOnline((v) => !v)}>
           <span className="toggle-label">{online ? "ONLINE" : "OFFLINE"}</span>
           <button
             aria-label="toggle online"
-            className={"switch" + (online ? " on" : "")}
+            className={`switch${online ? " on" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
               setOnline((v) => !v);
@@ -211,24 +216,22 @@ function Console() {
           />
         </div>
 
-        <button className="earnings-chip" onClick={() => setDrawerOpen(true)}>
-          <span>{me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}</span>
+        <button className="brut-btn brut-btn-white" style={{ padding: "8px 14px", fontSize: 12 }} onClick={() => setDrawerOpen(true)}>
+          {me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}
         </button>
       </header>
 
-      <div className="map-wrap">
-        {/* Fullscreen interactive MapView rendered in background */}
+      <div className="map-wrap" style={{ flex: 1, position: "relative" }}>
         <MapView me={myPos} stops={stops} onLocationPick={handleLocationPick} />
 
-        {/* Hotspot Presets Toolbar */}
         {!tripId && (
           <div className="location-bar">
-            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>POS:</span>
+            <span style={{ fontSize: 11, fontWeight: 800 }}>POSITION:</span>
             {HOTSPOTS.map((h) => (
               <button
                 key={h.name}
                 type="button"
-                className={`loc-pill ${myPos.lat === h.pos.lat && myPos.lng === h.pos.lng ? "active" : ""}`}
+                className={`chip-place ${myPos.lat === h.pos.lat && myPos.lng === h.pos.lng ? "selected" : ""}`}
                 onClick={() => handleLocationPick(h.pos)}
               >
                 {h.name}
@@ -237,10 +240,8 @@ function Console() {
           </div>
         )}
 
-        {/* Active Trip Panel */}
         {tripId !== null && <TripPanel tripId={tripId} onFinished={onTripClosed} />}
 
-        {/* Incoming Offer Overlay Card */}
         {!tripId && top && (
           <OfferCard
             key={`${top.offer.requestId}:${top.offer.negotiationId ?? ""}`}
@@ -250,16 +251,15 @@ function Console() {
           />
         )}
 
-        {/* Status indicator when waiting */}
         {!tripId && offers.length === 0 && (
-          <div className="map-status-pill">
+          <div className="map-status-pill brut-card" style={{ padding: "10px 18px", background: online ? "var(--green)" : "#fff" }}>
             {online ? (
               <>
                 <span className="radar-ping" />
-                <span>Broadcasting live location ({activeVehicle}) — waiting for rides…</span>
+                <span><strong>LIVE</strong> · Waiting for {activeVehicle === "ALL" ? "all ride types" : activeVehicle} near Koramangala…</span>
               </>
             ) : (
-              <span>Tap switch above to go <strong>ONLINE</strong> and receive ride requests</span>
+              <span>Flip the switch to go <strong>ONLINE</strong> and receive requests</span>
             )}
           </div>
         )}
@@ -272,8 +272,27 @@ function Console() {
 
 export default function App() {
   const [token, setTokenState] = useState<string | null>(getToken);
+  const [showLanding, setShowLanding] = useState(
+    () => !localStorage.getItem("chalox.driver.seenLanding"),
+  );
+
+  useEffect(() => {
+    const sync = (): void => setTokenState(getToken());
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
 
   if (!token) {
+    if (showLanding) {
+      return (
+        <DriverLanding
+          onGetStarted={() => {
+            localStorage.setItem("chalox.driver.seenLanding", "1");
+            setShowLanding(false);
+          }}
+        />
+      );
+    }
     return (
       <Routes>
         <Route path="/login" element={<Login onAuth={setTokenState} />} />

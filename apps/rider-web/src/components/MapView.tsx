@@ -32,6 +32,7 @@ export default function MapView({
   const dropRef = useRef<L.Marker | null>(null);
   const driverRef = useRef<L.Marker | null>(null);
   const lineRef = useRef<L.Polyline | null>(null);
+  const approachLineRef = useRef<L.Polyline | null>(null);
 
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
@@ -78,14 +79,23 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    approachLineRef.current?.remove();
+    approachLineRef.current = null;
     if (driver) {
       if (!driverRef.current) driverRef.current = L.marker(driver, { icon: pinIcon("", "pin-driver"), zIndexOffset: 500 }).addTo(map);
       else driverRef.current.setLatLng(driver);
+      if (pickup) {
+        approachLineRef.current = L.polyline([driver, pickup], {
+          color: "#111111",
+          dashArray: "3 7",
+          weight: 3,
+        }).addTo(map);
+      }
     } else {
       driverRef.current?.remove();
       driverRef.current = null;
     }
-  }, [driver?.lat, driver?.lng]);
+  }, [driver?.lat, driver?.lng, pickup?.lat, pickup?.lng]);
 
   return <div ref={hostRef} className="map-root" />;
 }

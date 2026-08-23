@@ -8,9 +8,10 @@ type Step = "PHONE" | "OTP";
 export default function Login({ onAuth }: { onAuth: () => void }): React.ReactElement {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("OTP");
-  const [phone, setPhone] = useState("+919900000001");
+  const [phone, setPhone] = useState(import.meta.env.DEV ? "+919900000001" : "");
   const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
         setSent(true);
       } else {
         const res = await api<{ token: string }>("/v1/auth/otp/verify", {
-          body: { phone, otp, role: "RIDER" },
+          body: { phone, otp, role: "RIDER", ...(newPassword.length >= 4 ? { newPassword } : {}) },
         });
         token = res.token;
       }
@@ -118,11 +119,10 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
             placeholder="+919876543210"
             autoComplete="tel"
           />
-
           {mode === "OTP" && sent && (
             <>
               <label className="step-label" htmlFor="otp">
-                Enter OTP <span className="pill">dev: 123456</span>
+                Enter OTP {import.meta.env.DEV && <span className="pill">dev: 123456</span>}
               </label>
               <input
                 id="otp"
@@ -133,14 +133,22 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
                 inputMode="numeric"
                 autoFocus
               />
+              <label className="step-label" htmlFor="new-password">Create password (optional)</label>
+              <input
+                id="new-password"
+                className="brut-input"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="At least 4 characters"
+                autoComplete="new-password"
+              />
             </>
           )}
 
           {mode === "PASSWORD" && (
             <>
-              <label className="step-label" htmlFor="password">
-                Password
-              </label>
+              <label className="step-label" htmlFor="password">Password</label>
               <input
                 id="password"
                 className="brut-input"
@@ -152,7 +160,7 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
                 autoFocus
               />
               <div className="ok-text" style={{ marginTop: 10 }}>
-                First time? Any password ≥ 4 chars registers this phone automatically.
+                Verify this phone with OTP once to create a password.
               </div>
             </>
           )}

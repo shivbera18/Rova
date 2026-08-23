@@ -7,9 +7,15 @@ import { LocationSearch, type SelectedPlace } from "../components/LocationSearch
 import CounterModal, { type DriverCounter } from "../components/CounterModal";
 import { useCountdown, useRiderSocket } from "../ws";
 import {
+  addTripTip,
+  cancelMatchedTrip,
   cancelRequest,
   getTrip,
+  getWallet,
+  listTrips,
   rateTrip,
+  regenerateTripOtp,
+  topUpWallet,
   type Quote,
   type RequestSessionView,
   type TripView,
@@ -106,6 +112,9 @@ export default function Book(): React.ReactElement {
   const [savedRoutes, setSavedRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.savedRoutes"));
   const [recentRoutes, setRecentRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.recentRoutes"));
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [cancelConfirm, setCancelConfirm] = useState(false);
 
   const routeRef = useRef<{ pickup: LatLon | null; drop: LatLon | null }>({ pickup: null, drop: null });
   routeRef.current = { pickup, drop };
@@ -124,6 +133,35 @@ export default function Book(): React.ReactElement {
       else setPhase((p) => (p.k === "trip" ? { ...p, trip: t } : p));
     } catch {}
   }, []);
+
+  useEffect(() => {
+    void getWallet().then((w) => setWalletBalance(w.balancePaise)).catch(() => undefined);
+    void listTrips()
+      .then(async ({ trips }) => {
+        const active = trips.find((trip) => !["COMPLETED", "CANCELLED_RIDER", "CANCELLED_DRIVER"].includes(trip.state));
+        if (!active) return;
+        let recovered = active;
+        if (["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(active.state) && !active.otp) {
+          const result = await regenerateTripOtp(active.id);
+          recovered = { ...active, otp: result.otp };
+        }
+        setPhase({ k: "trip", trip: recovered });
+      })
+      .catch(() => undefined);
+  }, []);
+
+  async function submitFeedback(stars: number, trip: TripView): Promise<void> {
+    try {
+      if (tipPaise > 0) await addTripTip(trip.id, tipPaise);
+      await rateTrip(trip.id, { stars, comment: selectedTag ?? undefined });
+      setRated(true);
+      if (tipPaise > 0) {
+        setPhase((p) => p.k === "done" ? { ...p, trip: { ...p.trip, fareBreakdown: { ...p.trip.fareBreakdown, tipPaise } } } : p);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not submit feedback");
+    }
+  }
 
   // Realtime WebSocket messages
   function onMessage(m: RiderWsMessage): void {
@@ -153,7 +191,7 @@ export default function Book(): React.ReactElement {
       });
     }
   }
-  useRiderSocket(onMessage);
+  useRiderSocket(onMessage, setWsConnected);
 
   // Poll assigned trip for position & state
   useEffect(() => {
@@ -185,7 +223,11 @@ export default function Book(): React.ReactElement {
         .then(async (j) => {
           if (j.trip?.id && j.state === "AGREED") {
             stopPoll();
-            const t = await getTrip(j.trip.id);
+            let t = await getTrip(j.trip.id);
+            if (["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(t.state) && !t.otp) {
+              const recovered = await regenerateTripOtp(t.id);
+              t = { ...t, otp: recovered.otp };
+            }
             setTipPaise(0);
             setRated(false);
             setPhase({ k: "trip", trip: t });
@@ -348,6 +390,9 @@ export default function Book(): React.ReactElement {
       </div>
 
       <div className="side-panel">
+        {!wsConnected && (phase.k === "matching" || phase.k === "trip") && (
+          <div className="connection-banner">⚠ Reconnecting live updates… REST recovery remains active.</div>
+        )}
         {error && (
           <div className="card panel-card">
             <div className="error-text" style={{ marginBottom: 10 }}>{error}</div>
@@ -448,7 +493,6 @@ export default function Book(): React.ReactElement {
                 </div>
               </>
             )}
-
             <div className="booking-options">
               <div>
                 <span className="option-label">Payment</span>
@@ -459,6 +503,19 @@ export default function Book(): React.ReactElement {
                     </button>
                   ))}
                 </div>
+                {walletBalance !== null && (
+                  <div className="wallet-inline">
+                    <span>Wallet {formatINR(paisa(walletBalance))}</span>
+                    <button
+                      type="button"
+                      onClick={() => void topUpWallet(10_000)
+                        .then((result) => setWalletBalance(result.balancePaise))
+                        .catch((err) => setError(err instanceof Error ? err.message : "Top-up failed"))}
+                    >
+                      + ₹100
+                    </button>
+                  </div>
+                )}
               </div>
               <span className="map-tip">Tip: click the map to pin locations</span>
             </div>
@@ -557,18 +614,28 @@ export default function Book(): React.ReactElement {
                 vehicleClass={phase.quote?.vehicleClass ?? ""}
                 platformFeePaise={phase.session.platformFeePaise ?? phase.quote?.platformFeePaise ?? 0}
                 onClose={() => setPhase((p) => (p.k === "matching" ? { ...p, counter: null } : p))}
+                minimumDriverPaise={phase.session.currentOfferPaise ?? 0}
                 onResolved={(outcome) => void onCounterResolved(outcome)}
               />
             )}
 
+            {phase.session.state === "EXPIRED" && pickup && drop && (
+              <button className="btn-primary" style={{ width: "100%", marginTop: 14 }} onClick={() => void loadQuotesForRoute(pickup, drop)}>
+                Search again with fresh fares
+              </button>
+            )}
             <button
               className="btn-danger"
               style={{ width: "100%", marginTop: 16 }}
               onClick={() => {
+                if (!cancelConfirm) {
+                  setCancelConfirm(true);
+                  return;
+                }
                 void cancelRequest(phase.session.sessionId).then(reset);
               }}
             >
-              Cancel Request
+              {cancelConfirm ? "Tap again to confirm cancellation" : "Cancel request"}
             </button>
           </div>
         )}
@@ -603,11 +670,29 @@ export default function Book(): React.ReactElement {
                 <div className="step-label" style={{ textAlign: "center", color: "var(--teal)" }}>
                   Show this OTP to your driver to start:
                 </div>
-                <div className="otp-display">{phase.trip.otp}</div>
+                <button
+                  type="button"
+                  className="otp-display"
+                  title="Copy start OTP"
+                  onClick={() => void navigator.clipboard.writeText(phase.trip.otp ?? "")}
+                >
+                  {phase.trip.otp} <small>Tap to copy</small>
+                </button>
               </>
             )}
 
             <FareLines trip={phase.trip} />
+            {["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(phase.trip.state) && (
+              <button
+                className="btn-danger"
+                style={{ width: "100%", marginTop: 12 }}
+                onClick={() => void cancelMatchedTrip(phase.trip.id)
+                  .then(() => reset())
+                  .catch((err) => setError(err instanceof Error ? err.message : "Cancellation failed"))}
+              >
+                Cancel matched ride
+              </button>
+            )}
           </div>
         )}
 
@@ -638,13 +723,7 @@ export default function Book(): React.ReactElement {
                       key={s}
                       className="star"
                       aria-label={`${s} stars`}
-                      onClick={() => {
-                        void rateTrip(phase.trip.id, { stars: s, comment: selectedTag ?? undefined })
-                          .then(() => setRated(true))
-                          .catch((err) =>
-                            setError(err instanceof Error ? err.message : "Could not record rating"),
-                          );
-                      }}
+                      onClick={() => void submitFeedback(s, phase.trip)}
                     >
                       ★
                     </button>

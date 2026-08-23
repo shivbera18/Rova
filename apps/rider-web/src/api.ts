@@ -112,6 +112,9 @@ export interface TripView {
   driverRating: number;
   driverLat?: number;
   driverLng?: number;
+  paymentMethod?: "WALLET" | "UPI" | "CASH";
+  startedAt?: string;
+  endedAt?: string;
 }
 
 /** Wire body uses plain numbers; the branded Paise lives inside @chalo/protocol types. */
@@ -148,6 +151,25 @@ export function cancelRequest(sessionId: string): Promise<{ ok: boolean }> {
   return api(`/v1/requests/${sessionId}/cancel`, { body: {} });
 }
 
+export function getWallet(): Promise<{ balancePaise: number }> {
+  return api("/v1/wallet/me");
+}
+
+export function topUpWallet(amountPaise: number): Promise<{ balancePaise: number }> {
+  return api("/v1/wallet/topup", { body: { amountPaise } });
+}
+
+export function addTripTip(tripId: string, amountPaise: number): Promise<{ ok: boolean; duplicate?: boolean }> {
+  return api(`/v1/trips/${tripId}/tip`, { body: { amountPaise } });
+}
+
+export function cancelMatchedTrip(tripId: string): Promise<{ state: string; duplicate?: boolean }> {
+  return api(`/v1/trips/${tripId}/cancel-rider`, { body: {} });
+}
+
+export function regenerateTripOtp(tripId: string): Promise<{ otp: string }> {
+  return api(`/v1/trips/${tripId}/regenerate-otp`, { body: {} });
+}
 export interface TripListResponse {
   trips: TripView[];
 }

@@ -3,9 +3,14 @@ import type { RiderWsMessage } from "@chalo/protocol";
 import { getToken } from "./api";
 
 /** Opens the rider WS (via vite proxy); retries until a token exists, reconnects with backoff. */
-export function useRiderSocket(onMessage: (m: RiderWsMessage) => void): void {
+export function useRiderSocket(
+  onMessage: (m: RiderWsMessage) => void,
+  onStatus?: (connected: boolean) => void,
+): void {
   const handlerRef = useRef(onMessage);
+  const statusRef = useRef(onStatus);
   handlerRef.current = onMessage;
+  statusRef.current = onStatus;
 
   useEffect(() => {
     let sock: WebSocket | null = null;
@@ -32,8 +37,10 @@ export function useRiderSocket(onMessage: (m: RiderWsMessage) => void): void {
       };
       sock.onopen = () => {
         backoff = 1000;
+        statusRef.current?.(true);
       };
       sock.onclose = () => {
+        statusRef.current?.(false);
         if (closed) return;
         timerId = setTimeout(connect, backoff);
         backoff = Math.min(backoff * 2, 15000);

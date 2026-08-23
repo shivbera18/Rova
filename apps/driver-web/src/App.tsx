@@ -17,15 +17,14 @@ const HOTSPOTS: Array<{ name: string; pos: LatLon }> = [
   { name: "📍 HSR Layout", pos: { lat: 12.9116, lng: 77.6474 } },
   { name: "📍 Airport", pos: { lat: 13.1986, lng: 77.7066 } },
 ];
-
 const VEHICLES = [
+  { id: "ALL", label: "⚡ ALL (Dev Mode)" },
   { id: "BIKE", label: "🏍️ Bike" },
   { id: "BIKE_LITE", label: "🛵 Bike Lite" },
   { id: "AUTO", label: "🛺 Auto" },
   { id: "CAB_MINI", label: "🚗 Mini" },
   { id: "CAB_PRIME", label: "🚘 Prime" },
   { id: "CAB_XL", label: "🚙 XL" },
-  { id: "ALL", label: "⚡ ALL (Dev)" },
 ];
 
 function Console() {
@@ -35,7 +34,7 @@ function Console() {
   const [tripId, setTripId] = useState<string | null>(() => localStorage.getItem(TRIP_KEY));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [myPos, setMyPos] = useState<LatLon>({ lat: 12.9352, lng: 77.6245 });
-  const [activeVehicle, setActiveVehicle] = useState("BIKE");
+  const [activeVehicle, setActiveVehicle] = useState("ALL");
   const [me, setMe] = useState<DriverMe | null>(null);
 
   const onlineRef = useRef(online);
@@ -49,9 +48,6 @@ function Console() {
       .driverMe()
       .then((data) => {
         setMe(data);
-        if (data.profile?.vehicle_class) {
-          setActiveVehicle(data.profile.vehicle_class);
-        }
       })
       .catch(() => undefined);
   }, []);

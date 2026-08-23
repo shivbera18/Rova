@@ -8,10 +8,11 @@ type Step = "PHONE" | "OTP";
 export function Login({ onAuth }: { onAuth: (token: string) => void }) {
   const [mode, setMode] = useState<Mode>("OTP");
   const [step, setStep] = useState<Step>("PHONE");
-  const [phone, setPhone] = useState("+919900000101");
+  const [phone, setPhone] = useState(import.meta.env.DEV ? "+919900000101" : "");
   const [otp, setOtp] = useState("");
   const [vehicleClass, setVehicleClass] = useState("BIKE");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -30,7 +31,7 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
         await api.sendOtp(phone);
         setStep("OTP");
       } else {
-        const sess = await api.verifyOtp(phone, otp, vehicleClass);
+        const sess = await api.verifyOtp(phone, otp, vehicleClass, newPassword.length >= 4 ? newPassword : undefined);
         if (sess.role !== "DRIVER") throw new Error("This account is not a driver");
         setToken(sess.token);
         localStorage.setItem("chalox.driver.seenLanding", "1");
@@ -78,11 +79,21 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
           {mode === "OTP" && step === "OTP" && (
             <>
               <label className="step-label" htmlFor="dotp">
-                Enter OTP <span className="pill">dev: 123456</span>
+                Enter OTP {import.meta.env.DEV && <span className="pill">dev: 123456</span>}
               </label>
               <input id="dotp" className="brut-input" value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                 placeholder="••••••" inputMode="numeric" autoFocus disabled={busy} />
+              <label className="step-label" htmlFor="driver-new-password">Create password (optional)</label>
+              <input
+                id="driver-new-password"
+                className="brut-input"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="At least 4 characters"
+                autoComplete="new-password"
+              />
             </>
           )}
 

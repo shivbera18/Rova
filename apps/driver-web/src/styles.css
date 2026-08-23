@@ -566,3 +566,33 @@ h3 {
   .location-bar { top: 8px; }
   .offer-card-overlay, .trip-panel-overlay { width: calc(100% - 16px); bottom: 8px; max-height: 74%; overflow-y: auto; }
 }
+
+.driver-onboarding { min-height: 100%; display: grid; place-items: center; padding: 20px; overflow-y: auto; background: var(--paper); }
+.onboarding-card { width: min(470px,100%); }
+.onboarding-card h1 { font-size: 28px; margin: 4px 0 8px; }
+.onboarding-card > p { color: var(--ink-soft); font-weight: 650; }
+.onboarding-steps { display: flex; align-items: center; margin: 18px 0; }
+.onboarding-steps span { display: grid; place-items: center; width: 55px; height: 55px; border: 2px solid var(--ink); border-radius: 50%; background: #fff; font-family: var(--font-display); }
+.onboarding-steps span.done { background: var(--green); }
+.onboarding-steps span.current { background: var(--yellow); box-shadow: 3px 3px 0 var(--ink); }
+.onboarding-steps small { font-family: var(--font-body); font-size: 7px; }
+.onboarding-steps i { flex: 1; height: 3px; background: var(--ink); }
+.document-list { margin: 12px 0; display: grid; gap: 6px; }
+.document-list div { display: flex; justify-content: space-between; border: 2px solid var(--ink); border-radius: 8px; padding: 8px; background: var(--paper); font-weight: 800; }
+.document-list small { color: var(--ink-soft); }
+.earnings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.earnings-grid > div { border: 2px solid var(--ink); border-radius: 8px; background: var(--yellow); padding: 9px; }
+.earnings-grid small, .earnings-grid strong { display: block; }
+.earnings-grid small { font-size: 8px; font-weight: 900; letter-spacing: .08em; }
+.earnings-grid strong { font-family: var(--font-display); font-size: 16px; }
+.earnings-hero { background: var(--teal); }
+.payout-card > small { display: block; margin: 3px 0 9px; }
+.drawer-section-title { margin: 14px 0 8px; }
+.drawer-trip-list { display: grid; gap: 8px; }
+.trip-receipt b { color: #065f46; }
+.trip-receipt small { color: var(--ink-soft); }
+
+@media (max-width: 720px) {
+  .driver-onboarding { align-items: start; padding: 12px; }
+  .onboarding-card { margin-bottom: 20px; }
+}

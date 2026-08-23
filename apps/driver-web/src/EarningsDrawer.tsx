@@ -3,94 +3,67 @@ import { formatINR, paisa, type TripView } from "@chalo/protocol";
 import { api } from "./api";
 
 export interface DriverMe {
-  profile: {
-    vehicle_class: string;
-    plate: string;
-    kyc_status: string;
-    online: boolean;
-  } | null;
+  profile: { vehicle_class: string; plate: string; kyc_status: string; online: boolean } | null;
+  rating: number;
   walletBalancePaise: number;
   completedTrips: number;
+  todayEarningsPaise: number;
+  weekEarningsPaise: number;
+  cashEarningsPaise: number;
+  digitalEarningsPaise: number;
 }
 
 export function EarningsDrawer({ onClose }: { onClose: () => void }) {
   const [me, setMe] = useState<DriverMe | null>(null);
   const [trips, setTrips] = useState<TripView[]>([]);
+  const [payout, setPayout] = useState("200");
+  const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  function reload(): void {
     void api.driverMe().then(setMe).catch(() => undefined);
     void api.trips().then((r) => setTrips(r.trips)).catch(() => undefined);
-  }, []);
+  }
+  useEffect(reload, []);
+
+  async function withdraw(): Promise<void> {
+    try {
+      const result = await api.payout(Math.round(Number(payout) * 100));
+      setMessage(`Payout requested. Balance ${formatINR(paisa(result.balancePaise))}`);
+      reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Payout failed");
+    }
+  }
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-header">
-          <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Driver Dashboard</h2>
-          <button className="btn btn-skip" style={{ padding: "6px 10px" }} onClick={onClose}>
-            ✕
-          </button>
-        </div>
+        <div className="drawer-header"><h2>Driver earnings</h2><button className="btn btn-skip" onClick={onClose}>✕</button></div>
+        {me && <>
+          <div className="drawer-card earnings-hero">
+            <small>AVAILABLE BALANCE</small>
+            <div className="drawer-balance-val">{formatINR(paisa(me.walletBalancePaise))}</div>
+            <div className="row"><span className="brut-badge brut-badge-green">KYC {me.profile?.kyc_status}</span><span className="brut-badge">★ {me.rating.toFixed(2)}</span></div>
+          </div>
+          <div className="earnings-grid">
+            <div><small>TODAY</small><strong>{formatINR(paisa(me.todayEarningsPaise))}</strong></div>
+            <div><small>7 DAYS</small><strong>{formatINR(paisa(me.weekEarningsPaise))}</strong></div>
+            <div><small>CASH</small><strong>{formatINR(paisa(me.cashEarningsPaise))}</strong></div>
+            <div><small>DIGITAL</small><strong>{formatINR(paisa(me.digitalEarningsPaise))}</strong></div>
+          </div>
+          <div className="drawer-card payout-card">
+            <strong>Withdraw to bank</strong><small>Minimum ₹200 · pilot transfer simulation</small>
+            <div className="row"><input className="brut-input" value={payout} onChange={(e) => setPayout(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Payout amount in rupees" /><button className="brut-btn brut-btn-primary" onClick={() => void withdraw()}>Withdraw</button></div>
+            {message && <div className="ok-text">{message}</div>}
+          </div>
+          <div className="offer-stats-grid"><div className="stat-box"><div className="num">{me.completedTrips}</div><div className="lbl">Trips</div></div><div className="stat-box"><div className="num">{me.profile?.vehicle_class}</div><div className="lbl">Vehicle</div></div><div className="stat-box"><div className="num">100%</div><div className="lbl">Keep rate</div></div></div>
+        </>}
 
-        {me && (
-          <>
-            <div className="drawer-card">
-              <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>
-                Total Wallet Balance
-              </div>
-              <div className="drawer-balance-val">{formatINR(paisa(me.walletBalancePaise))}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <span className="loc-pill" style={{ color: "#10b981", background: "var(--good-dim)" }}>
-                  ✓ KYC {me.profile?.kyc_status ?? "APPROVED"}
-                </span>
-                <span className="loc-pill">
-                  {me.profile?.vehicle_class ?? "BIKE"}
-                </span>
-                <span className="loc-pill">
-                  {me.profile?.plate ?? "KA01XX0000"}
-                </span>
-              </div>
-            </div>
-
-            <div className="offer-stats-grid" style={{ marginBottom: 16 }}>
-              <div className="stat-box">
-                <div className="num">{me.completedTrips}</div>
-                <div className="lbl">Completed Rides</div>
-              </div>
-              <div className="stat-box">
-                <div className="num">★ 4.9</div>
-                <div className="lbl">Rating</div>
-              </div>
-              <div className="stat-box">
-                <div className="num">100%</div>
-                <div className="lbl">Keep Rate</div>
-              </div>
-            </div>
-          </>
-        )}
-
-        <div style={{ fontSize: 13, fontWeight: 700, margin: "10px 0 8px", color: "var(--text-dim)" }}>
-          Recent Trip Receipts
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
-          {trips.length === 0 ? (
-            <p className="muted" style={{ textAlign: "center", marginTop: 20 }}>No completed trips yet.</p>
-          ) : (
-            trips.map((t) => (
-              <div key={t.id} className="drawer-card" style={{ padding: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: 13 }}>{t.vehicleClass}</span>
-                  <span style={{ color: "var(--accent-light)", fontWeight: 800 }}>
-                    +{formatINR(paisa(t.fareBreakdown?.agreedPaise ?? 0))}
-                  </span>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                  Trip ID: {t.id.slice(0, 8)} · Status: {t.state}
-                </div>
-              </div>
-            ))
-          )}
+        <h3 className="drawer-section-title">Recent receipts</h3>
+        <div className="drawer-trip-list">
+          {trips.filter((trip) => trip.state === "COMPLETED").length === 0 ? <p className="muted">No completed trips yet.</p> : trips.filter((trip) => trip.state === "COMPLETED").map((trip) => (
+            <div key={trip.id} className="drawer-card trip-receipt"><div className="spread"><strong>{trip.vehicleClass.replaceAll("_", " ")}</strong><b>+{formatINR(paisa(trip.fareBreakdown?.agreedPaise ?? 0))}</b></div><small>{trip.paymentMethod ?? "UPI"} · {trip.endedAt ? new Date(trip.endedAt).toLocaleString("en-IN") : trip.state}</small></div>
+          ))}
         </div>
       </div>
     </div>

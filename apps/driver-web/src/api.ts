@@ -44,16 +44,27 @@ async function call<T>(path: string, method: string, body?: unknown): Promise<T>
 export const api = {
   sendOtp: (phone: string) =>
     call<{ sent: boolean; devHint?: string }>("/v1/auth/otp/send", "POST", { phone }),
-  verifyOtp: (phone: string, otp: string, vehicleClass: string) =>
-    call<AuthSession>("/v1/auth/otp/verify", "POST", { phone, otp, role: "DRIVER", vehicleClass }),
+  verifyOtp: (phone: string, otp: string, vehicleClass: string, newPassword?: string) =>
+    call<AuthSession>("/v1/auth/otp/verify", "POST", { phone, otp, role: "DRIVER", vehicleClass, ...(newPassword ? { newPassword } : {}) }),
   passwordLogin: (phone: string, password: string, role: "DRIVER" | "RIDER", vehicleClass: string) =>
     call<AuthSession>("/v1/auth/login/password", "POST", { phone, password, role, vehicleClass }),
   driverMe: () =>
     call<{
       profile: { vehicle_class: string; plate: string; kyc_status: string; online: boolean } | null;
+      rating: number;
       walletBalancePaise: number;
       completedTrips: number;
+      todayEarningsPaise: number;
+      weekEarningsPaise: number;
+      cashEarningsPaise: number;
+      digitalEarningsPaise: number;
     }>("/v1/driver/me", "GET"),
+  payout: (amountPaise: number) =>
+    call<{ balancePaise: number; txnId: string }>("/v1/driver/payout", "POST", { amountPaise }),
+  submitOnboarding: (plate: string) =>
+    call<{ status: string }>("/v1/driver/onboarding", "POST", { plate }),
+  devApproveOnboarding: () =>
+    call<{ status: string }>("/v1/driver/onboarding/dev-approve", "POST"),
   acceptRequest: (id: string) =>
     call<{ tripId: string }>(`/v1/requests/${id}/accept`, "POST"),
   acceptNegotiation: (id: string) =>

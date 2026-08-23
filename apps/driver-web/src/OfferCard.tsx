@@ -6,21 +6,29 @@ export interface OfferEntry {
   offer: Offer;
   ttlMs: number;
 }
+let audioContext: AudioContext | null = null;
+
+export async function unlockOfferAudio(): Promise<void> {
+  try {
+    audioContext ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    if (audioContext.state === "suspended") await audioContext.resume();
+  } catch {}
+}
 
 function playChime(): void {
   try {
-    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    if (!audioContext || audioContext.state !== "running") return;
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+    osc.frequency.setValueAtTime(587.33, audioContext.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.35);
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(audioContext.destination);
     osc.start();
-    osc.stop(ctx.currentTime + 0.35);
+    osc.stop(audioContext.currentTime + 0.35);
   } catch {}
 }
 

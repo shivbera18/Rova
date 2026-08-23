@@ -4,9 +4,10 @@ import { formatINR, paisa, type LatLon } from "@chalo/protocol";
 import { connectDriverSocket, getToken, api, type DriverSocket, type Offer } from "./api";
 import { Login, DriverLanding } from "./Login";
 import { MapView, type MapStops } from "./MapView";
-import { OfferCard, type OfferEntry } from "./OfferCard";
+import { OfferCard, unlockOfferAudio, type OfferEntry } from "./OfferCard";
 import { TripPanel } from "./TripPanel";
 import { EarningsDrawer, type DriverMe } from "./EarningsDrawer";
+import { OnboardingCard } from "./OnboardingCard";
 import { enablePushNotifications, pushSupported } from "./push";
 
 const TRIP_KEY = "cx.driver.trip";
@@ -47,6 +48,7 @@ function Console() {
         setMe(data);
         setSessionReady(true);
         if (data.profile?.vehicle_class) setActiveVehicle(data.profile.vehicle_class);
+        if (typeof data.profile?.online === "boolean") setOnline(data.profile.online);
       })
       .catch(() => {
         // api.ts purges stale tokens and dispatches "storage" on 401/403.
@@ -173,6 +175,9 @@ function Console() {
     stops.drop = top.offer.drop;
   }
 
+  if (me?.profile && me.profile.kyc_status !== "APPROVED") {
+    return <OnboardingCard vehicle={me.profile.vehicle_class} status={me.profile.kyc_status} onUpdated={loadMe} />;
+  }
   return (
     <div className="app-shell" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <header className="topbar">
@@ -192,13 +197,14 @@ function Console() {
         </div>
         <div style={{ flex: 1 }} />
 
-        <div className={`toggle-wrap${online ? " online" : ""}`} onClick={() => setOnline((v) => !v)}>
+        <div className={`toggle-wrap${online ? " online" : ""}`} onClick={() => { void unlockOfferAudio(); setOnline((v) => !v); }}>
           <span className="toggle-label">{online ? "ONLINE" : "OFFLINE"}</span>
           <button
             aria-label="toggle online"
             className={`switch${online ? " on" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
+              void unlockOfferAudio();
               setOnline((v) => !v);
             }}
           />

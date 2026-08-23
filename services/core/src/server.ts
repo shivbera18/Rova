@@ -35,6 +35,7 @@ import {
 } from "./negotiation.ts";
 import {
   broadcastOffer,
+  cancelBroadcast,
   claimRequest,
   claimedDriver,
   getLiveDriver,
@@ -342,6 +343,9 @@ export async function startServer(listenPort = PORT): Promise<{
     );
     for (const n of negs.rows) await cancelByRider(sql, n.id).catch(() => undefined);
     releaseClaim(id);
+    // tell every live driver their offer card is dead — otherwise stale offers
+    // linger on the driver console and accepts fail later with NOT_CLAIMABLE
+    void cancelBroadcast(id);
     return { ok: true };
   });
 
@@ -480,9 +484,15 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = await session(req);
     if (!sess || sess.role !== "RIDER") fail(403, "FORBIDDEN", "rider only");
     const { id } = req.params as { id: string };
-    const neg = await riderDecline(sql, id);
-    releaseClaim(neg.request_id);
-    return { ok: true };
+    try {
+      const neg = await riderDecline(sql, id);
+      releaseClaim(neg.request_id);
+      void cancelBroadcast(neg.request_id); // clear the offer card on driver consoles
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof NegotationError) fail(409, err.code, err.message);
+      throw err;
+    }
   });
 
   // ---- trips ----------------------------------------------------------------------
@@ -530,13 +540,18 @@ export async function startServer(listenPort = PORT): Promise<{
     const { tipPaise } = req.body as { tipPaise?: number };
 
     // transition FIRST, then settle (settle requires COMPLETED)
-    await transitionTrip(sql, id, "COMPLETED");
-    const settlement = await settleTrip(sql, id, tipPaise ?? 0);
+    try {
+      await transitionTrip(sql, id, "COMPLETED");
+      const settlement = await settleTrip(sql, id, tipPaise ?? 0);
 
-    const trip = (await getTrip(sql, id))!;
-    pushRider(trip.rider_id, { t: "trip.state", state: "COMPLETED" });
-    pushDriver(sess.userId, { t: "trip.state", state: "COMPLETED", tripId: id });
-    return { state: "COMPLETED", txnId: settlement.txnId, duplicate: settlement.duplicate };
+      const trip = (await getTrip(sql, id))!;
+      pushRider(trip.rider_id, { t: "trip.state", state: "COMPLETED" });
+      pushDriver(sess.userId, { t: "trip.state", state: "COMPLETED", tripId: id });
+      return { state: "COMPLETED", txnId: settlement.txnId, duplicate: settlement.duplicate };
+    } catch (err) {
+      if (err instanceof TripError) fail(409, err.code, err.message);
+      throw err;
+    }
   });
 
   app.get("/v1/trips/:id", async (req) => {
@@ -872,6 +887,7 @@ export async function startServer(listenPort = PORT): Promise<{
       const expired = await sweepExpiredNegotiations(sql);
       for (const exp of expired) {
         releaseClaim(exp.requestId);
+        void cancelBroadcast(exp.requestId); // clear dead offer cards on driver consoles
         pushRider(exp.riderId, {
           t: "request.updated",
           session: {

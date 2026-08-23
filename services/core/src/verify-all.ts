@@ -17,8 +17,8 @@
  *    - Scenario H: OTP start failure (invalid code rejection + correct code start)
  *    - Scenario I: Cash ride settlement (cash receivable + digital fee)
  *    - Scenario J: Ratings & duplicate rating rejection
- *    - Scenario K: Driver profile, trips summary & wallet accounting
  */
+process.env.NO_AUTO_START = "1";
 import WebSocket from "ws";
 import { formatINR, paisa, platformFee, negotiatedQuote, canTransition, LEGAL_TRIP_TRANSITIONS } from "@chalo/protocol";
 import { issueQuoteToken, verifyQuoteToken, quoteFromCard } from "./pricing.ts";

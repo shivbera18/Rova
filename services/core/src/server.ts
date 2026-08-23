@@ -856,7 +856,8 @@ export async function startServer(listenPort = PORT): Promise<{
     },
   };
 }
-if (process.argv[1]?.replace(/\\/g, "/").endsWith("server.ts")) {
+const isMain = process.argv.some((arg) => arg.replace(/\\/g, "/").endsWith("server.ts") || arg.replace(/\\/g, "/").endsWith("server.js"));
+if (isMain) {
   startServer().catch((err: unknown) => {
     console.error("[core] fatal", err);
     process.exit(1);

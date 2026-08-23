@@ -96,11 +96,19 @@ export async function startServer(listenPort = PORT): Promise<{
   const app = Fastify({ logger: false });
   await app.register(cors, { origin: true });
   await app.register(websocket);
-
   async function session(req: FastifyRequest): Promise<Session | null> {
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) return null;
-    return verifyToken(header.slice(7));
+    const tokenSess = await verifyToken(header.slice(7));
+    if (!tokenSess) return null;
+    const u = await sql.query<{ id: string; status: string }>(
+      "SELECT id, status FROM users WHERE id=$1",
+      [tokenSess.userId],
+    );
+    if (u.rows.length === 0 || u.rows[0]!.status !== "ACTIVE") {
+      return null;
+    }
+    return tokenSess;
   }
   async function requireApprovedDriver(driverId: string, vehicleClass?: string): Promise<void> {
     const r = await sql.query<{ kyc_status: string; vehicle_class: string }>(
@@ -631,6 +639,11 @@ export async function startServer(listenPort = PORT): Promise<{
         socket.close(4401, "unauthorized");
         return;
       }
+      const u = await sql.query<{ id: string }>("SELECT id FROM users WHERE id=$1 AND status='ACTIVE'", [sess.userId]);
+      if (u.rows.length === 0) {
+        socket.close(4401, "unauthorized");
+        return;
+      }
       riderConns[sess.userId] = { socket };
       socket.on("close", () => delete riderConns[sess.userId]);
     })();
@@ -644,8 +657,6 @@ export async function startServer(listenPort = PORT): Promise<{
         socket.close(4401, "unauthorized");
         return;
       }
-      driverConns[sess.userId] = { socket };
-
       const profile = (
         await sql.query<{
           vehicle_class: string;
@@ -656,15 +667,21 @@ export async function startServer(listenPort = PORT): Promise<{
           last_lng: number | null;
         }>(
           `SELECT d.vehicle_class, d.plate, u.full_name, u.rating_rolling, d.last_lat, d.last_lng
-           FROM driver_profiles d JOIN users u ON u.id = d.user_id WHERE d.user_id=$1`,
+           FROM driver_profiles d JOIN users u ON u.id = d.user_id WHERE d.user_id=$1 AND u.status='ACTIVE'`,
           [sess.userId],
         )
       ).rows[0];
 
+      if (!profile) {
+        socket.close(4401, "unauthorized");
+        return;
+      }
+      driverConns[sess.userId] = { socket };
+
       registerDriver({
         driverId: sess.userId,
-        vehicleClass: profile?.vehicle_class ?? "BIKE",
-        pos: { lat: profile?.last_lat ?? 12.97, lng: profile?.last_lng ?? 77.59 },
+        vehicleClass: profile.vehicle_class ?? "BIKE",
+        pos: { lat: profile.last_lat ?? 12.97, lng: profile.last_lng ?? 77.59 },
         online: true,
         onTrip: false,
         name: profile?.full_name ?? "Driver",

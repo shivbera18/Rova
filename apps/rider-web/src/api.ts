@@ -36,6 +36,10 @@ export async function api<T>(
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
+    if (res.status === 401) {
+      setToken(null);
+      window.dispatchEvent(new Event("storage"));
+    }
     throw new ApiError(
       res.status,
       String(json.code ?? "ERROR"),

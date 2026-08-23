@@ -14,6 +14,15 @@ const bidxKey = createHash("sha256").update(process.env.JWT_SECRET ?? "dev-only-
 
 export const DEV_OTP = "123456";
 
+export class AuthError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export function phoneBlindIndex(phone: string): string {
   return createHash("sha256").update(bidxKey).update(phone).digest("hex");
 }
@@ -50,11 +59,16 @@ export async function upsertUser(
   fullName: string,
 ): Promise<{ id: string }> {
   const bidx = phoneBlindIndex(phone);
-  const existing = await sql.query<{ id: string }>("SELECT id FROM users WHERE phone_bidx = $1", [bidx]);
+  const existing = await sql.query<{ id: string; role: Role }>("SELECT id, role FROM users WHERE phone_bidx = $1", [
+    bidx,
+  ]);
   if (existing.rows.length > 0) {
     const row = existing.rows[0]!;
+    if (row.role !== role) {
+      throw new AuthError("ROLE_MISMATCH", `Phone number is already registered as a ${row.role.toLowerCase()}`);
+    }
     await sql.query("UPDATE users SET full_name = $2 WHERE id = $1", [row.id, fullName]);
-    return row;
+    return { id: row.id };
   }
   const id = randomUUID();
   await sql.query("INSERT INTO users (id, phone_bidx, full_name, role) VALUES ($1,$2,$3,$4)", [

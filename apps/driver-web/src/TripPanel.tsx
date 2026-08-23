@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatINR, paisa, type TripView } from "@chalo/protocol";
 import { api } from "./api";
+import { NeoCard, NeoButton, NeoBadge, NeoInput } from "./NeoComponents";
 
 const STATE_COPY: Record<string, string> = {
   DRIVER_ASSIGNED: "Head to Pickup",
@@ -52,10 +53,10 @@ export function TripPanel({
 
   if (!trip) {
     return (
-      <div className="trip-panel-overlay">
-        <h3 style={{ margin: 0 }}>Loading trip…</h3>
+      <NeoCard elevation="lg" className="trip-panel-overlay" style={{ padding: 22, background: "#ffffff" }}>
+        <h3 style={{ margin: 0, fontSize: 18 }}>Loading trip...</h3>
         {err && <div className="error-text" style={{ marginTop: 8 }}>{err}</div>}
-      </div>
+      </NeoCard>
     );
   }
 
@@ -64,126 +65,128 @@ export function TripPanel({
   const navTarget = isPickupPhase ? trip.pickup : trip.drop;
 
   return (
-    <div className="trip-panel-overlay">
-      <div className="trip-status-header">
+    <NeoCard elevation="lg" className="trip-panel-overlay" style={{ padding: 22, background: "#ffffff" }}>
+      <div className="spread" style={{ marginBottom: 12 }}>
         <div>
-          <span className="trip-status-badge">{STATE_COPY[trip.state] ?? trip.state}</span>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Trip ID: {trip.id.slice(0, 8)}</div>
+          <NeoBadge variant="primary">{STATE_COPY[trip.state] ?? trip.state}</NeoBadge>
+          <div style={{ fontSize: 11, color: "var(--ink-muted)", marginTop: 4 }}>
+            Trip ID: #{trip.id.slice(0, 8).toUpperCase()}
+          </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Your Pay</div>
-          <div className="trip-pay-highlight">{fare ? formatINR(paisa(fare.agreedPaise)) : "—"}</div>
-        </div>
-      </div>
-
-      <div className="trip-coords-box">
-        <div className="coord-row">
-          <span className="coord-dot pickup" />
-          <div>
-            <div className="coord-lbl">PICKUP POINT</div>
-            <div className="coord-text">{trip.pickup.lat.toFixed(5)}, {trip.pickup.lng.toFixed(5)}</div>
+          <div style={{ fontSize: 10, color: "var(--ink-muted)", textTransform: "uppercase", fontWeight: 800 }}>
+            Your Take-Home Pay
           </div>
-        </div>
-        <div className="coord-row">
-          <span className="coord-dot drop" />
-          <div>
-            <div className="coord-lbl">DROP DESTINATION</div>
-            <div className="coord-text">{trip.drop.lat.toFixed(5)}, {trip.drop.lng.toFixed(5)}</div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 900, color: "var(--ink)" }}>
+            {fare ? formatINR(paisa(fare.agreedPaise)) : "—"}
           </div>
         </div>
       </div>
 
-      {err && <div className="error-text" style={{ marginBottom: 12 }}>{err}</div>}
+      <div
+        className="brut-card"
+        style={{
+          padding: 12,
+          background: "var(--paper-subtle)",
+          borderRadius: "var(--radius-sm)",
+          marginBottom: 12,
+        }}
+      >
+        <div className="spread" style={{ fontSize: 12, padding: "2px 0" }}>
+          <span style={{ color: "var(--ink-muted)", fontWeight: 700 }}>Pickup</span>
+          <strong style={{ fontSize: 11.5 }}>{trip.pickup.lat.toFixed(4)}, {trip.pickup.lng.toFixed(4)}</strong>
+        </div>
+        <div className="spread" style={{ fontSize: 12, padding: "2px 0" }}>
+          <span style={{ color: "var(--ink-muted)", fontWeight: 700 }}>Drop</span>
+          <strong style={{ fontSize: 11.5 }}>{trip.drop.lat.toFixed(4)}, {trip.drop.lng.toFixed(4)}</strong>
+        </div>
+      </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+      {err && <div className="error-text" style={{ marginBottom: 12 }}>⚠️ {err}</div>}
+
+      <div style={{ marginBottom: 12 }}>
         <a
-          className="btn btn-counter"
-          style={{ textDecoration: "none" }}
+          className="brut-btn brut-btn-white brut-btn-full"
+          style={{ textDecoration: "none", padding: "10px 14px", fontSize: 13 }}
           href={`https://www.google.com/maps/dir/?api=1&destination=${navTarget.lat},${navTarget.lng}`}
           target="_blank"
           rel="noreferrer"
         >
-          📍 Navigate to {isPickupPhase ? "Pickup" : "Drop"}
+          📍 Open Navigation to {isPickupPhase ? "Pickup" : "Destination"}
         </a>
       </div>
 
       {trip.state === "DRIVER_ASSIGNED" && (
-        <button
-          className="btn btn-accept"
-          style={{ width: "100%" }}
+        <NeoButton
+          variant="primary"
+          fullWidth
           disabled={busy}
           onClick={() => act(() => api.tripState(trip.id, "ARRIVING"))}
         >
           🚀 I'm on my way (ARRIVING)
-        </button>
+        </NeoButton>
       )}
 
       {trip.state === "ARRIVING" && (
-        <button
-          className="btn btn-accept"
-          style={{ width: "100%" }}
+        <NeoButton
+          variant="primary"
+          fullWidth
           disabled={busy}
           onClick={() => act(() => api.tripState(trip.id, "ARRIVED"))}
         >
           📍 I have arrived at pickup
-        </button>
+        </NeoButton>
       )}
 
       {trip.state === "ARRIVED" && (
-        <div className="otp-box">
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-            Enter Passenger's 6-Digit OTP:
-          </div>
-          <input
-            className="otp-input"
+        <div style={{ margin: "8px 0" }}>
+          <NeoInput
+            label="Passenger's 4-Digit Start OTP"
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-            placeholder="······"
+            placeholder="····"
             inputMode="numeric"
             autoFocus
           />
-          <button
-            className="btn btn-accept"
-            style={{ width: "100%", marginTop: 10 }}
-            disabled={busy || otp.length !== 6}
+          <NeoButton
+            variant="green"
+            fullWidth
+            disabled={busy || otp.length < 4}
             onClick={() => act(() => api.startTrip(trip.id, otp))}
           >
-            ✓ Verify OTP & Start Ride
-          </button>
+            Start Trip (Verify OTP) 🔑
+          </NeoButton>
         </div>
       )}
 
       {trip.state === "ONGOING" && (
-        <button
-          className="btn btn-accept"
-          style={{ width: "100%" }}
+        <NeoButton
+          variant="primary"
+          fullWidth
           disabled={busy}
           onClick={() => act(() => api.completeTrip(trip.id, 0))}
         >
-          🏁 Complete Ride & Settle Pay
-        </button>
+          🏁 Complete Trip & Collect {fare ? formatINR(paisa(fare.agreedPaise)) : ""}
+        </NeoButton>
       )}
 
       {trip.state === "COMPLETED" && (
-        <div>
-          <div style={{ background: "var(--good-dim)", color: "var(--good)", padding: 12, borderRadius: 10, textAlign: "center", fontWeight: 700, marginBottom: 12 }}>
-            ✓ Ride Complete — {fare ? formatINR(paisa(fare.agreedPaise)) : ""} credited to your wallet!
-          </div>
-          <button className="btn btn-accept" style={{ width: "100%" }} onClick={onFinished}>
-            Back Online for Next Ride
-          </button>
+        <div style={{ textAlign: "center", marginTop: 8 }}>
+          <NeoBadge variant="green" style={{ marginBottom: 10 }}>TRIP FINISHED</NeoBadge>
+          <NeoButton variant="primary" fullWidth onClick={onFinished}>
+            Back to Live Radar 🚀
+          </NeoButton>
         </div>
       )}
-      {(trip.state === "CANCELLED_RIDER" || trip.state === "CANCELLED_DRIVER") && (
-        <div>
-          <div style={{ background: "var(--bad-dim)", color: "var(--bad)", padding: 12, borderRadius: 10, textAlign: "center", fontWeight: 700, marginBottom: 12 }}>
-            ✕ Ride Cancelled ({trip.state === "CANCELLED_RIDER" ? "By Passenger" : "By You"})
-          </div>
-          <button className="btn btn-accept" style={{ width: "100%" }} onClick={onFinished}>
-            Back Online for Next Ride
-          </button>
+
+      {trip.state.startsWith("CANCELLED") && (
+        <div style={{ textAlign: "center", marginTop: 8 }}>
+          <NeoBadge variant="red" style={{ marginBottom: 10 }}>{STATE_COPY[trip.state]}</NeoBadge>
+          <NeoButton variant="white" fullWidth onClick={onFinished}>
+            Back to Live Radar
+          </NeoButton>
         </div>
       )}
-    </div>
+    </NeoCard>
   );
 }

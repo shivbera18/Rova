@@ -1,14 +1,22 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { PhoneCall, Share2, ShieldCheck, UserRoundCheck, X } from "lucide-react";
+import { NeoCard, NeoButton, NeoInput } from "./NeoComponents";
 
 export function SafetyPanel({ onClose }: { onClose: () => void }): React.ReactElement {
   const [contact, setContact] = useState(() => localStorage.getItem("chalox.safety.contact") ?? "");
   const [saved, setSaved] = useState(false);
 
   async function shareTrip(): Promise<void> {
-    const data = { title: "My Chalo-X trip", text: "Track my current Chalo-X ride. If I need help, please contact me.", url: window.location.href };
-    if (navigator.share) { await navigator.share(data).catch(() => undefined); return; }
+    const data = {
+      title: "My Chalo-X trip",
+      text: "Track my current Chalo-X ride. If I need help, please contact me.",
+      url: window.location.href,
+    };
+    if (navigator.share) {
+      await navigator.share(data).catch(() => undefined);
+      return;
+    }
     await navigator.clipboard.writeText(`${data.text} ${data.url}`);
     setSaved(true);
   }
@@ -22,23 +30,102 @@ export function SafetyPanel({ onClose }: { onClose: () => void }): React.ReactEl
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="modal-backdrop" />
-        <Dialog.Content className="brut-card safety-panel radix-safety-content" aria-describedby="safety-description">
-          <div className="spread">
-            <div><span className="eyebrow">SAFETY CENTRE</span><Dialog.Title asChild><h2>Help is one tap away</h2></Dialog.Title></div>
-            <Dialog.Close asChild><button className="btn-ghost compact" aria-label="Close Safety Centre"><X size={20} /></button></Dialog.Close>
-          </div>
-          <Dialog.Description id="safety-description" className="muted">Emergency, sharing, and trusted contact tools for your ride.</Dialog.Description>
+        <Dialog.Content
+          className="radix-safety-content"
+          aria-describedby="safety-description"
+          style={{ width: "min(460px, calc(100vw - 32px))", outline: "none" }}
+        >
+          <NeoCard elevation="lg" style={{ padding: 26, background: "#ffffff" }}>
+            <div className="spread" style={{ marginBottom: 8 }}>
+              <span className="eyebrow">RIDER SAFETY CENTRE</span>
+              <Dialog.Close asChild>
+                <button
+                  className="brut-btn brut-btn-white brut-btn-sm"
+                  aria-label="Close Safety Centre"
+                  style={{ width: 28, height: 28, padding: 0 }}
+                >
+                  <X size={16} />
+                </button>
+              </Dialog.Close>
+            </div>
 
-          <a className="safety-action emergency" href="tel:112"><PhoneCall size={25}/><div><strong>Call emergency services</strong><small>Dial 112 in India</small></div><b>→</b></a>
-          <button className="safety-action share" onClick={() => void shareTrip()}><Share2 size={25}/><div><strong>Share my trip</strong><small>Send your live app link to someone you trust</small></div><b>→</b></button>
+            <Dialog.Title asChild>
+              <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>
+                Help is one tap away
+              </h2>
+            </Dialog.Title>
 
-          <div className="trusted-contact">
-            <label className="step-label" htmlFor="trusted-phone"><UserRoundCheck size={15}/> Trusted contact</label>
-            <div className="row"><input id="trusted-phone" className="brut-input" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="+91 phone number" inputMode="tel"/><button className="brut-btn brut-btn-primary" onClick={saveContact}>Save</button></div>
-          </div>
-          {saved && <div className="ok-text">✓ Saved / copied successfully</div>}
+            <Dialog.Description id="safety-description" className="muted" style={{ fontSize: 13, marginBottom: 18 }}>
+              Direct emergency dispatch, live journey sharing, and trusted contact alerts.
+            </Dialog.Description>
 
-          <div className="safety-tips"><strong><ShieldCheck size={16}/> Before every ride</strong><ul><li>Match the driver name and number plate.</li><li>Never share your OTP before meeting the driver.</li><li>Use Share Trip when travelling late.</li></ul></div>
+            <div className="col" style={{ gap: 10, marginBottom: 18 }}>
+              <a
+                className="brut-btn brut-btn-red brut-btn-full"
+                href="tel:112"
+                style={{ textDecoration: "none", padding: "12px 18px", gap: 10 }}
+              >
+                <PhoneCall size={18} />
+                <span>Call Emergency Police (112)</span>
+              </a>
+
+              <NeoButton
+                variant="white"
+                fullWidth
+                onClick={() => void shareTrip()}
+                style={{ padding: "12px 18px", gap: 10 }}
+              >
+                <Share2 size={18} />
+                <span>Share Live Journey Link</span>
+              </NeoButton>
+            </div>
+
+            <div className="booking-divider"><span>TRUSTED CONTACT</span></div>
+
+            <div style={{ marginTop: 12 }}>
+              <NeoInput
+                label="Trusted Phone Number"
+                type="tel"
+                placeholder="+91..."
+                value={contact}
+                onChange={(e) => {
+                  setContact(e.target.value);
+                  setSaved(false);
+                }}
+              />
+              <NeoButton variant="primary" fullWidth onClick={saveContact}>
+                <UserRoundCheck size={16} />
+                <span>Save Trusted Contact</span>
+              </NeoButton>
+            </div>
+
+            {saved && (
+              <div className="ok-text" style={{ marginTop: 12 }}>
+                ✓ Trusted contact saved successfully
+              </div>
+            )}
+
+            <div
+              className="brut-card"
+              style={{
+                marginTop: 18,
+                padding: 14,
+                background: "var(--paper-subtle)",
+                borderRadius: "var(--radius-sm)",
+                borderColor: "var(--ink)",
+              }}
+            >
+              <div className="row" style={{ gap: 6, fontWeight: 800, fontSize: 12.5, color: "var(--ink)" }}>
+                <ShieldCheck size={16} color="var(--green)" />
+                <span>Before Every Ride</span>
+              </div>
+              <ul style={{ margin: "8px 0 0 18px", fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+                <li>Match license plate number with your driver's app</li>
+                <li>Verify your 4-digit start OTP before boarding</li>
+                <li>Track live road telemetry during your trip</li>
+              </ul>
+            </div>
+          </NeoCard>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

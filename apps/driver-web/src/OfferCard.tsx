@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatINR, paisa } from "@chalo/protocol";
 import { api, type Offer } from "./api";
+import { NeoCard, NeoButton, NeoBadge } from "./NeoComponents";
 
 export interface OfferEntry {
   offer: Offer;
@@ -48,12 +49,10 @@ export function OfferCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Play alert chime on arrival
   useEffect(() => {
     playChime();
   }, [offer.requestId]);
 
-  // Countdown timer
   useEffect(() => {
     const end = Date.now() + ttlMs;
     const iv = setInterval(() => {
@@ -102,113 +101,166 @@ export function OfferCard({
     }
   };
 
-  const currentRupees = offer.takeHomePaise / 100;
   const progressPct = Math.max(0, Math.min(100, (seconds / (ttlMs / 1000)) * 100));
 
   return (
-    <div className="offer-card-overlay">
-      <div className="offer-header">
-        <div className="offer-badge">
-          <span>⚡</span>
-          <span>{offer.isCounter ? `Rider Final · R${offer.round}` : `Offer · R${offer.round}`}</span>
+    <NeoCard elevation="lg" className="offer-card-overlay" style={{ padding: 22, background: "#ffffff" }}>
+      <div className="spread" style={{ marginBottom: 8 }}>
+        <div className="row" style={{ gap: 6 }}>
+          <NeoBadge variant="primary">
+            {offer.isCounter ? `Rider Final · R${offer.round}` : `Offer · R${offer.round}`}
+          </NeoBadge>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-muted)" }}>
+            {offer.paymentMethod}
+          </span>
         </div>
-        <div className="countdown-badge">⏱ {seconds}s</div>
+        <NeoBadge variant="red">⏱ {seconds}s</NeoBadge>
       </div>
 
-      <div className="progress-line-track">
+      <div className="progress-line-track" style={{ marginBottom: 12 }}>
         <div className="progress-line-fill" style={{ width: `${progressPct}%` }} />
       </div>
 
-      <div className="offer-amount-row">
+      <div className="spread" style={{ marginBottom: 8 }}>
         <div>
-          <div className="offer-amount-label">YOUR TAKE-HOME PAY</div>
-          <div className="offer-amount-val">{formatINR(paisa(offer.takeHomePaise))}</div>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", color: "var(--ink-muted)", letterSpacing: "0.05em" }}>
+            Your Take-Home Pay
+          </div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, color: "var(--ink)" }}>
+            {offer.takeHomePaise === 0 ? "Free Ride" : formatINR(paisa(offer.takeHomePaise))}
+          </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div className="offer-amount-label">PAYMENT</div>
-          <div style={{ fontWeight: 800, color: "#10b981", fontSize: 13 }}>{offer.paymentMethod}</div>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", color: "var(--ink-muted)", letterSpacing: "0.05em" }}>
+            Commission Cut
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>₹0 (0% Cut)</div>
         </div>
       </div>
 
-      <div className="offer-subtitle">
+      <div
+        className="row"
+        style={{
+          gap: 6,
+          fontSize: 12,
+          color: "var(--ink-soft)",
+          padding: "6px 10px",
+          background: "var(--paper-subtle)",
+          borderRadius: "var(--radius-sm)",
+          marginBottom: 12,
+        }}
+      >
         <span>👤 {offer.riderName || "Rider"}</span>
         <span>·</span>
         <span>★ {offer.riderRating ? offer.riderRating.toFixed(1) : "4.8"}</span>
         <span>·</span>
-        <span style={{ color: "var(--accent)" }}>100% of this pay is yours</span>
+        <span style={{ color: "var(--primary)", fontWeight: 700 }}>100% earnings to wallet</span>
       </div>
 
       <div className="offer-stats-grid">
         <div className="stat-box">
           <div className="num">{offer.pickupKm} km</div>
-          <div className="lbl">Pickup Dist</div>
+          <div className="lbl">To Pickup</div>
         </div>
         <div className="stat-box">
           <div className="num">{offer.tripKm} km</div>
           <div className="lbl">Trip Dist</div>
         </div>
-        <div className={`stat-box ${offer.takeHomePaise === 0 ? "zero-offer" : ""}`}>
-          <div className="num">{offer.takeHomePaise === 0 ? "Free ride" : `₹${Math.round((offer.takeHomePaise / 100) / Math.max(offer.tripKm, 0.5))}`}</div>
-          <div className="lbl">{offer.takeHomePaise === 0 ? "Rider's offer" : "Rate / km"}</div>
+        <div className="stat-box">
+          <div className="num">
+            {offer.takeHomePaise === 0 ? "Free" : `₹${Math.round((offer.takeHomePaise / 100) / Math.max(offer.tripKm, 0.5))}`}
+          </div>
+          <div className="lbl">Rate / km</div>
         </div>
       </div>
 
-      {error && <div className="error-text" style={{ marginBottom: 12, fontSize: 12 }}>{error}</div>}
+      {error && (
+        <div className="error-text" style={{ marginBottom: 10 }}>
+          ⚠️ {error}
+        </div>
+      )}
 
-      {showCounter && offer.negotiationId ? (
-        <div className="counter-box">
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-dim)" }}>
-            Propose Your Desired Take-Home:
+      {showCounter ? (
+        <div
+          className="brut-card brut-card-primary"
+          style={{ padding: 14, marginBottom: 12, borderRadius: "var(--radius-sm)" }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", marginBottom: 8, color: "var(--primary)" }}>
+            Propose Your Counter (₹)
           </div>
-          <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
-            {[10, 20, 30, 50].map((inc) => (
-              <button
-                key={inc}
-                className="loc-pill"
-                type="button"
-                onClick={() => setCounterInput((currentRupees + inc).toString())}
-              >
-                +₹{inc}
-              </button>
-            ))}
-          </div>
-          <div className="counter-input-row">
-            <span>₹</span>
+          <div className="row" style={{ gap: 8, marginBottom: 10 }}>
             <input
+              className="brut-input"
               type="number"
               value={counterInput}
               onChange={(e) => setCounterInput(e.target.value)}
-              placeholder={`> ₹${currentRupees}`}
               autoFocus
             />
-            <button
-              className="btn btn-accept"
-              style={{ flex: "0 0 auto", padding: "10px 16px" }}
-              disabled={busy || Number(counterInput) <= currentRupees}
+            <NeoButton
+              variant="primary"
+              disabled={busy}
               onClick={() => void submitCounter(Number(counterInput))}
             >
-              Send ₹{counterInput}
-            </button>
-            <button className="btn btn-skip" onClick={() => setShowCounter(false)}>
-              ✕
+              Send Counter
+            </NeoButton>
+          </div>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            {[10, 20, 30, 50].map((add) => {
+              const val = Math.round(offer.takeHomePaise / 100 + add);
+              return (
+                <button
+                  key={add}
+                  type="button"
+                  className="brut-btn brut-btn-white brut-btn-sm"
+                  style={{ padding: "3px 8px", fontSize: 11 }}
+                  onClick={() => setCounterInput(String(val))}
+                >
+                  +₹{add} (₹{val})
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              className="brut-btn brut-btn-white brut-btn-sm"
+              style={{ padding: "3px 8px", fontSize: 11, marginLeft: "auto" }}
+              onClick={() => setShowCounter(false)}
+            >
+              Cancel
             </button>
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="offer-actions">
+          <NeoButton
+            variant="primary"
+            disabled={busy}
+            onClick={() => void accept()}
+            style={{ flex: 2 }}
+          >
+            Accept ({formatINR(paisa(offer.takeHomePaise))}) 🚀
+          </NeoButton>
 
-      <div className="offer-actions">
-        <button className="btn btn-accept" disabled={busy} onClick={() => void accept()}>
-          ✓ Accept {formatINR(paisa(offer.takeHomePaise))}
-        </button>
-        {offer.negotiationId && !offer.isCounter && !showCounter && (
-          <button className="btn btn-counter" disabled={busy} onClick={() => setShowCounter(true)}>
-            💬 Counter
-          </button>
-        )}
-        <button className="btn btn-skip" disabled={busy} onClick={onSkip} title="Skip this request">
-          Skip
-        </button>
-      </div>
-    </div>
+          {offer.negotiationId && (
+            <NeoButton
+              variant="accent"
+              disabled={busy}
+              onClick={() => setShowCounter(true)}
+              style={{ flex: 1 }}
+            >
+              Counter
+            </NeoButton>
+          )}
+
+          <NeoButton
+            variant="white"
+            disabled={busy}
+            onClick={onSkip}
+            style={{ flex: 0.8 }}
+          >
+            Skip
+          </NeoButton>
+        </div>
+      )}
+    </NeoCard>
   );
 }

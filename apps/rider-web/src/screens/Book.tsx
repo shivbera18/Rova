@@ -18,12 +18,13 @@ type Phase =
   | { k: "pick" }
   | { k: "quotes"; quotes: Quote[] }
   | { k: "offer"; quote: Quote }
-  | { k: "matching"; session: RequestSessionView; counter: DriverCounter | null }
+  | { k: "matching"; session: RequestSessionView; counter: DriverCounter | null; quote: Quote | null }
   | { k: "trip"; trip: TripView }
   | { k: "done"; trip: TripView };
 
 const PAY_METHODS = ["UPI", "WALLET", "CASH"] as const;
-const MATCH_TOTAL_S = 120;
+// must match the server's offerStageTtlS so the countdown bar hits 0 at real expiry
+const MATCH_TOTAL_S = 45;
 
 const POPULAR_ROUTES: Array<{ label: string; pickup: LatLon; drop: LatLon }> = [
   {
@@ -137,8 +138,13 @@ export default function Book(): React.ReactElement {
     const iv = setInterval(() => {
       void getTrip(id)
         .then((t) => {
-          setPhase((p) => (p.k === "trip" ? { ...p, trip: t } : p));
-          if (t.state === "COMPLETED") setPhase({ k: "done", trip: t });
+          setPhase((p) => {
+            if (p.k !== "trip") return p;
+            // GET /v1/trips/:id never includes the OTP (only the WS assignment does);
+            // keep showing it instead of letting it vanish on the first poll
+            const merged = { ...t, otp: t.otp ?? p.trip.otp };
+            return merged.state === "COMPLETED" ? { k: "done", trip: merged } : { ...p, trip: merged };
+          });
         })
         .catch(() => undefined);
     }, 3000);
@@ -337,14 +343,14 @@ export default function Book(): React.ReactElement {
             drop={drop!}
             payMethod={payMethod}
             onClose={() => setPhase({ k: "quotes", quotes: lastQuotes.current })}
-            onBooked={(session) => setPhase({ k: "matching", session, counter: null })}
+            onBooked={(session) => setPhase({ k: "matching", session, counter: null, quote: phase.quote })}
           />
         )}
 
         {phase.k === "matching" && (
           <div className="card panel-card">
             <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800 }}>
-              {phase.session.mode === "NEGOTIATING" ? "⚡ Broadcasting Offer…" : "Finding Drivers…"}
+              {phase.session.mode === "NEGOTIATED" ? "⚡ Broadcasting Offer…" : "Finding Drivers…"}
             </h3>
             <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
               {phase.session.mode === "NEGOTIATED"
@@ -369,8 +375,8 @@ export default function Book(): React.ReactElement {
             {phase.counter && (
               <CounterModal
                 counter={phase.counter}
-                quote={null}
-                vehicleClass="BIKE"
+                quote={phase.quote}
+                vehicleClass={phase.quote?.vehicleClass ?? ""}
                 onClose={() => setPhase((p) => (p.k === "matching" ? { ...p, counter: null } : p))}
                 onResolved={(o) => void onCounterResolved(o)}
               />
@@ -456,7 +462,9 @@ export default function Book(): React.ReactElement {
                       onClick={() => {
                         void rateTrip(phase.trip.id, { stars: s, comment: selectedTag ?? undefined })
                           .then(() => setRated(true))
-                          .catch(() => setError("Rating recorded"));
+                          .catch((err) =>
+                            setError(err instanceof Error ? err.message : "Could not record rating"),
+                          );
                       }}
                     >
                       ★

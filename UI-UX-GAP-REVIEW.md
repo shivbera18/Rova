@@ -176,3 +176,32 @@ These are backend fixes discovered while auditing UI expectations — cheap to f
 *Evidence policy: every claim cites file + line in the current tree; behavioral claims were verified against the running stack (Neon-backed full-flow suite, 66/66 passing at time of writing). Second-pass items in §7.7–15 and §8 were verified by direct source inspection on the same tree.*
 
 
+
+---
+
+## 8. Remediation status — 2026-08-23
+
+All P0 and P1 findings above have now been addressed:
+
+| Finding | Resolution |
+|---|---|
+| U1 Tipping | Rider-only idempotent tip endpoint, real ledger posting, receipt update, and UI submission with rating. |
+| U2 Matched cancellation | `cancel-rider` endpoint plus pre-start rider cancellation button and driver release. |
+| U3 OTP reload loss | Active-trip recovery plus authenticated OTP regeneration after page reload or missed WS assignment. |
+| U4 Write-only ratings | Rolling database rating recomputed and returned in driver profile/dispatch. |
+| U5 Weak receipts | Payment method, start/end time, detail modal, sharing, and Print/PDF invoice view. |
+| R1 Wallet | Balance display, development top-up, and insufficient-balance booking guard. |
+| R2 Current location | Browser high-accuracy current-location control and India-wide address search. |
+| R3 Tracking | Live driver marker, approach polyline, polling recovery, and traffic-aware route ETA. |
+| R4 Alerts | VAPID Web Push for offers/counters/assignment and driver audio alert. |
+| R5 WS degradation | Visible reconnect status with REST recovery retained. |
+| R6 Counter total | Driver, platform, and net totals shown; both rider amounts editable in final split. |
+| R7 Receipt detail | Detailed receipt, share action, timestamps, payment method, and printable invoice. |
+| D1 Payout | Minimum-balance withdrawal endpoint and driver payout UI. |
+| D2 Onboarding/KYC | Fixed-vehicle registration, plate submission, review state, and pilot approval flow. |
+| D3 Online persistence | Driver UI restores persisted online state. |
+| D4 Earnings aggregation | Today/week/cash/digital totals and real rolling rating. |
+| D5 ALL class | Removed; one immutable registered vehicle is enforced end to end. |
+| D6 Chime gesture | AudioContext unlocks on the driver’s Go Online gesture. |
+
+The original evidence remains above for historical context; this table reflects the current implementation.

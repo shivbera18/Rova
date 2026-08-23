@@ -7,13 +7,14 @@ Complete operational guide to running, developing, testing, and deploying the Ch
 ## Table of Contents
 
 1. [System Requirements](#1-system-requirements)
-2. [Port Allocation & Architecture](#2-port-allocation--architecture)
-3. [Local Development Mode (Zero-Config / Embedded)](#3-local-development-mode-zero-config--embedded)
-4. [Local Development Mode (with Docker PostgreSQL & Redis)](#4-local-development-mode-with-docker-postgresql--redis)
-5. [End-to-End Walkthrough Guide](#5-end-to-end-walkthrough-guide)
-6. [Production Deployment Mode](#6-production-deployment-mode)
-7. [Automated Testing & Verification](#7-automated-testing--verification)
-8. [Troubleshooting & FAQ](#8-troubleshooting--faq)
+2. [Monorepo Architecture & Hot Reloading](#2-monorepo-architecture--hot-reloading)
+3. [Do You Need Docker for Development? (No Rebuilds)](#3-do-you-need-docker-for-development-no-rebuilds)
+4. [Local Development: Single-Command Quickstart](#4-local-development-single-command-quickstart)
+5. [Local Development: Using Docker for PostgreSQL & Redis](#5-local-development-using-docker-for-postgresql--redis)
+6. [End-to-End Multi-Client Walkthrough Guide](#6-end-to-end-multi-client-walkthrough-guide)
+7. [Production Deployment Mode](#7-production-deployment-mode)
+8. [Automated Testing & Verification Suite](#8-automated-testing--verification-suite)
+9. [Troubleshooting & FAQ](#9-troubleshooting--faq)
 
 ---
 
@@ -35,44 +36,50 @@ git --version
 
 ---
 
-## 2. Port Allocation & Architecture
+## 2. Monorepo Architecture & Hot Reloading
+
+The project is configured as an integrated **Monorepo** managed with **Turborepo** (`turbo.json`) and **pnpm workspaces** (`pnpm-workspace.yaml`).
 
 ```
-                               ┌────────────────────────────────────────┐
-                               │              Browser Tab 1             │
-                               │   Rider Web Console (React / Vite)     │
-                               │          http://localhost:5173         │
-                               └───────────────────┬────────────────────┘
-                                                   │ Proxy /v1 & /ws/rider
-                                                   ▼
-┌───────────────────────────────┐      ┌───────────────────────────────┐
-│         Browser Tab 2         │      │      Fastify Core Backend     │
-│ Driver Web Console (React)    ├─────►│  REST API + WebSocket Gateway │
-│     http://localhost:5174     │      │     http://localhost:8080     │
-└───────────────────────────────┘      └──────────────┬────────────────┘
-      Proxy /v1 & /ws/driver                          │
-                                                      ▼
-                                       ┌───────────────────────────────┐
-                                       │        Storage Layer          │
-                                       │   • Dev: PGlite (Embedded)    │
-                                       │   • Prod: PostgreSQL 16       │
-                                       └───────────────────────────────┘
+chalo-x/
+├── apps/
+│   ├── rider-web/       # Rider SPA (React 18 + Vite + Leaflet)       -> :5173
+│   └── driver-web/      # Driver SPA (React 18 + Vite + Leaflet)      -> :5174
+├── services/
+│   └── core/            # Fastify API, WebSocket Gateway & Ledger    -> :8080
+├── packages/
+│   └── protocol/        # Shared money math, FSMs, API/WS contracts
+├── GUIDE.md             # Complete Local Development & Production Run Guide
+└── plan.md              # Full 22-week Architecture & Production Specification
 ```
 
-| Service | Workspace Path | Default Port | Description |
+### How Hot-Reloading Works Across Workspaces
+
+| Workspace | Technology | Feedback Loop | How Changes Are Handled |
 |---|---|---|---|
-| **Core API & WebSocket** | `services/core` | `8080` | Fastify REST API + WebSocket channels (`/ws/rider`, `/ws/driver`) |
-| **Rider Web Console** | `apps/rider-web` | `5173` | Rider Single Page App with Leaflet OSM map & negotiation sheet |
-| **Driver Web Console** | `apps/driver-web` | `5174` | Driver Single Page App with presence toggle & offer cards |
-| **Protocol Types** | `packages/protocol` | — | Shared types, state machines, and money primitives |
-| **PostgreSQL (Optional Dev / Prod)** | `docker-compose.yml` | `5432` | Primary relational store (Docker) |
-| **Redis (Optional Dev / Prod)** | `docker-compose.yml` | `6379` | Cache and pub/sub broker (Docker) |
+| **Backend Core** (`services/core`) | `tsx watch src/server.ts` | **< 100ms** | Watches TypeScript files and restarts instantaneously on file save. |
+| **Rider Web** (`apps/rider-web`) | Vite React HMR | **< 50ms** | Instant updates in the browser without losing component state. |
+| **Driver Web** (`apps/driver-web`) | Vite React HMR | **< 50ms** | Instant updates in the browser. |
+| **Shared Protocol** (`packages/protocol`) | TypeScript Source Alias | **Instant** | Editing a shared type, money formula, or FSM transition updates both web apps and the backend with **zero rebuilds**. |
 
 ---
 
-## 3. Local Development Mode (Zero-Config / Embedded)
+## 3. Do You Need Docker for Development? (No Rebuilds)
 
-In zero-config mode, the core backend automatically starts with an embedded WASM PostgreSQL instance (`PGlite`), requiring **zero background databases or Docker containers**.
+### ❌ **NO Docker Required During Development**
+You **never need to build or rebuild Docker images** while developing or testing features.
+
+#### Why You Don't Need Docker in Development:
+1. **Zero-Config Embedded Database**: We engineered the backend with a dual-mode storage engine (`storage.ts`). When `DATABASE_URL` is unset, the backend runs **embedded WASM PostgreSQL (`PGlite`)** directly inside the Node process.
+   - All database tables, SQL queries, constraints, and migrations run natively on your machine without a database server or container.
+2. **In-Memory Messaging & Presence**: Dispatch ring search and WebSocket channels run directly in memory.
+3. **Where Docker IS Used (Optional / Production Only)**:
+   - Docker is provided in `docker-compose.yml` for **production staging** (running a standalone PostgreSQL 16 server and Redis instance on Linux/AWS).
+   - Even in Docker mode, it only runs the database service — your application code is never packaged into containers during development.
+
+---
+
+## 4. Local Development: Single-Command Quickstart
 
 ### Step 1: Install Dependencies
 From the repository root:
@@ -89,42 +96,28 @@ pnpm --filter @chalo/core db:migrate
 pnpm --filter @chalo/core seed
 ```
 
-Output:
-```
-applied 0001_init (18 statements)
-applied 0003_ratings (1 statements)
-applied 0004_request_platform_fee (2 statements)
-migrations complete
-seeded: city=1 Bengaluru, 6 fare cards, rider + 3 approved drivers
-login phones — rider: +919900000001 | drivers: +919900000101, +919900000102, +919900000103
-dev OTP for everyone: 123456
-```
+### Step 3: Start the Entire Platform with Turborepo
 
-### Step 3: Start Services
-
-Open **three separate terminal windows** (or use your IDE's terminal split):
-
-#### Terminal 1 — Core Backend (Port 8080):
+Run a single command:
 ```bash
-pnpm --filter @chalo/core dev
+pnpm dev
 ```
-*Expected log:* `[core] listening on :8080 (storage: pglite)`
 
-#### Terminal 2 — Rider Web Console (Port 5173):
-```bash
-pnpm --filter rider-web dev
+Turborepo concurrently starts all three services in parallel with color-coded live logs:
 ```
-*Expected URL:* `http://localhost:5173/`
+@chalo/core:dev: [core] listening on :8080 (storage: pglite)
+rider-web:dev:   ➜  Local:   http://localhost:5173/
+driver-web:dev:  ➜  Local:   http://localhost:5174/
+```
 
-#### Terminal 3 — Driver Web Console (Port 5174):
-```bash
-pnpm --filter driver-web dev
-```
-*Expected URL:* `http://localhost:5174/`
+> **Individual Services:** If you prefer running services in separate terminals, you can run:
+> - Backend: `pnpm --filter @chalo/core dev`
+> - Rider App: `pnpm --filter rider-web dev`
+> - Driver App: `pnpm --filter driver-web dev`
 
 ---
 
-## 4. Local Development Mode (with Docker PostgreSQL & Redis)
+## 5. Local Development: Using Docker for PostgreSQL & Redis
 
 If you prefer testing against real PostgreSQL 16 and Redis containers:
 
@@ -134,7 +127,7 @@ docker compose up -d
 ```
 
 ### Step 2: Set Environment Variables
-Create `services/core/.env`:
+Create `services/core/.env` (or copy from `services/core/.env.example`):
 ```env
 PORT=8080
 DATABASE_URL=postgres://chalo:chalo@localhost:5432/chalox
@@ -148,16 +141,14 @@ pnpm --filter @chalo/core db:migrate
 pnpm --filter @chalo/core seed
 ```
 
-### Step 4: Start Services
+### Step 4: Start Platform
 ```bash
-pnpm --filter @chalo/core dev
-pnpm --filter rider-web dev
-pnpm --filter driver-web dev
+pnpm dev
 ```
 
 ---
 
-## 5. End-to-End Walkthrough Guide
+## 6. End-to-End Multi-Client Walkthrough Guide
 
 Follow this walkthrough across two browser tabs to test the full negotiated ride flow.
 
@@ -226,11 +217,9 @@ Follow this walkthrough across two browser tabs to test the full negotiated ride
 
 ---
 
-## 6. Production Deployment Mode
+## 7. Production Deployment Mode
 
 ### Environment Variables
-
-Configure these variables in your production environment or container orchestrator:
 
 | Variable | Type | Default | Production Example | Description |
 |---|---|---|---|---|
@@ -262,9 +251,7 @@ Build outputs:
 
 ```bash
 cd services/core
-NODE_ENV=production DATABASE_URL=postgres://... node --experimental-strip-types src/server.ts
-# or via tsx:
-pnpm --filter @chalo/core start
+NODE_ENV=production DATABASE_URL=postgres://... pnpm start
 ```
 
 ---
@@ -272,22 +259,19 @@ pnpm --filter @chalo/core start
 ### Reverse Proxy Configuration (Nginx Example)
 
 ```nginx
-# Upstream Fastify Backend
 upstream core_backend {
     server 127.0.0.1:8080;
     keepalive 32;
 }
 
-# 1. Rider Console (rider.chalo-x.com)
+# Rider Console (rider.chalo-x.com)
 server {
     listen 443 ssl http2;
     server_name rider.chalo-x.com;
 
-    # SSL certificates
     ssl_certificate /etc/letsencrypt/live/rider.chalo-x.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/rider.chalo-x.com/privkey.pem;
 
-    # Static SPA assets
     root /var/www/chalo-x/apps/rider-web/dist;
     index index.html;
 
@@ -295,7 +279,6 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # REST API Proxy
     location /v1/ {
         proxy_pass http://core_backend;
         proxy_http_version 1.1;
@@ -305,7 +288,6 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # WebSocket Gateway Proxy
     location /ws/ {
         proxy_pass http://core_backend;
         proxy_http_version 1.1;
@@ -317,16 +299,14 @@ server {
     }
 }
 
-# 2. Driver Console (driver.chalo-x.com)
+# Driver Console (driver.chalo-x.com)
 server {
     listen 443 ssl http2;
     server_name driver.chalo-x.com;
 
-    # SSL certificates
     ssl_certificate /etc/letsencrypt/live/driver.chalo-x.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/driver.chalo-x.com/privkey.pem;
 
-    # Static SPA assets
     root /var/www/chalo-x/apps/driver-web/dist;
     index index.html;
 
@@ -357,31 +337,23 @@ server {
 
 ---
 
-## 7. Automated Testing & Verification
+## 8. Automated Testing & Verification Suite
 
-The repository includes three layers of automated test suites:
-
-### 1. Protocol Unit Tests (Money, FSMs, Invariants)
 ```bash
-pnpm --filter @chalo/protocol test
-```
-*Tests money clamping, ₹0 calculations, legal/illegal FSM transitions, and haversine calculations.*
-
-### 2. Core Full Verification Suite (64 Assertions)
-```bash
+# 1. Full 64-assertion verification suite (covers all invariants, state transitions, ledger balance, and live API flows)
 pnpm --filter @chalo/core test:verify
-```
-*Tests cryptographic token signing, trip state progression, OTP salted hashing, double-entry ledger balance, and all 10 live API negotiation scenarios.*
 
-### 3. Full Monorepo Typecheck & Production Build
-```bash
+# 2. Protocol unit tests (money clamping, ₹0 formulas, legal/illegal FSM transitions)
+pnpm --filter @chalo/protocol test
+
+# 3. Monorepo TypeScript check & production build verification
 pnpm typecheck
 pnpm build
 ```
 
 ---
 
-## 8. Troubleshooting & FAQ
+## 9. Troubleshooting & FAQ
 
 #### Q1: `Error: listen EADDRINUSE: address already in use 127.0.0.1:8080`
 Another instance of `core-api` is already running on port 8080.

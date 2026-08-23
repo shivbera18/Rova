@@ -4,7 +4,9 @@ Production-ready ride-hailing platform with **negotiated pricing**: riders can n
 
 ---
 
-## Workspace Layout
+## Monorepo Architecture
+
+The platform is structured as a high-performance **Monorepo** managed with **Turborepo** and **pnpm workspaces**:
 
 ```
 chalo-x/
@@ -21,22 +23,42 @@ chalo-x/
 
 ---
 
-## 30-Second Quickstart (Zero-Config Development)
+## Development Experience: Do You Need Docker?
 
-The platform runs in **zero-config mode out of the box** using embedded WASM PostgreSQL (`PGlite`) with no external database or Docker setup required.
+### ❌ **NO Docker Required During Development**
+You **never need to build or rebuild Docker images** while developing or testing features.
+
+| Feature | How It Works in Dev (Zero Docker) | Reload / Feedback Speed |
+|---|---|---|
+| **Database** | Embedded WASM PostgreSQL (`PGlite`) runs in-process | **Zero setup**, instant startup |
+| **Backend Code** | `tsx watch src/server.ts` automatically watches `.ts` files | **< 100ms** instant reload |
+| **Rider Web App** | Vite Hot Module Replacement (HMR) | **< 50ms** instant browser update |
+| **Driver Web App** | Vite Hot Module Replacement (HMR) | **< 50ms** instant browser update |
+| **Shared Protocol** | TypeScript workspace source alias | **Instant** across all apps |
+
+> **Where is Docker used?** Docker (`docker-compose.yml`) is provided **only** for production staging to run a standalone PostgreSQL 16 server and Redis 7 broker. Even in Docker mode, it only runs the database service — your application code is never trapped in slow image rebuild loops.
+
+---
+
+## Single-Command Quickstart
 
 ```bash
-# 1. Install dependencies
+# 1. Install dependencies across the entire monorepo
 pnpm install
 
 # 2. Run migrations & seed pilot city data (Bengaluru + demo accounts)
 pnpm --filter @chalo/core db:migrate
 pnpm --filter @chalo/core seed
 
-# 3. Start services in separate terminal windows:
-pnpm --filter @chalo/core dev     # Backend API + WS on :8080
-pnpm --filter rider-web dev       # Rider Console on :5173
-pnpm --filter driver-web dev      # Driver Console on :5174
+# 3. Start the ENTIRE platform with a single command (Turborepo):
+pnpm dev
+```
+
+Turborepo runs all three services concurrently in one terminal with color-coded live logs:
+```
+@chalo/core:dev: [core] listening on :8080 (storage: pglite)
+rider-web:dev:   ➜  Local:   http://localhost:5173/
+driver-web:dev:  ➜  Local:   http://localhost:5174/
 ```
 
 ### Pre-Seeded Test Logins (Dev OTP: `123456`)
@@ -53,7 +75,7 @@ pnpm --filter driver-web dev      # Driver Console on :5174
 ## Full Guides & Documentation
 
 - 📖 **[GUIDE.md](./GUIDE.md)**: Exhaustive manual for:
-  - Docker Compose setup with PostgreSQL 16 & Redis
+  - Docker vs. No-Docker development comparison
   - Step-by-step multi-client negotiation walkthrough
   - Production deployment, environment variables & Nginx reverse proxy configs
   - Automated testing & troubleshooting

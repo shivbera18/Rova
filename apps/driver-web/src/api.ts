@@ -48,10 +48,14 @@ export const api = {
       walletBalancePaise: number;
       completedTrips: number;
     }>("/v1/driver/me", "GET"),
+  acceptRequest: (id: string) =>
+    call<{ tripId: string }>(`/v1/requests/${id}/accept`, "POST"),
   acceptNegotiation: (id: string) =>
     call<{ tripId: string }>(`/v1/negotiations/${id}/accept`, "POST"),
   counterNegotiation: (id: string, paise: number) =>
     call<{ state: string; round: number }>(`/v1/negotiations/${id}/counter`, "POST", { paise }),
+  updateStatus: (body: { online?: boolean; vehicleClass?: string; lat?: number; lng?: number }) =>
+    call<{ profile: any }>("/v1/driver/status", "POST", body),
   trip: (id: string) => call<TripView>(`/v1/trips/${id}`, "GET"),
   trips: () => call<{ trips: TripView[] }>("/v1/trips", "GET"),
   tripState: (id: string, to: "ARRIVING" | "ARRIVED") =>

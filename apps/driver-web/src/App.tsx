@@ -10,35 +10,76 @@ import { EarningsDrawer, type DriverMe } from "./EarningsDrawer";
 
 const TRIP_KEY = "cx.driver.trip";
 
+const HOTSPOTS: Array<{ name: string; pos: LatLon }> = [
+  { name: "📍 Koramangala", pos: { lat: 12.9352, lng: 77.6245 } },
+  { name: "📍 Indiranagar", pos: { lat: 12.9784, lng: 77.6408 } },
+  { name: "📍 MG Road", pos: { lat: 12.9757, lng: 77.6068 } },
+  { name: "📍 HSR Layout", pos: { lat: 12.9116, lng: 77.6474 } },
+  { name: "📍 Airport", pos: { lat: 13.1986, lng: 77.7066 } },
+];
+
+const VEHICLES = [
+  { id: "BIKE", label: "🏍️ Bike" },
+  { id: "BIKE_LITE", label: "🛵 Bike Lite" },
+  { id: "AUTO", label: "🛺 Auto" },
+  { id: "CAB_MINI", label: "🚗 Mini" },
+  { id: "CAB_PRIME", label: "🚘 Prime" },
+  { id: "CAB_XL", label: "🚙 XL" },
+  { id: "ALL", label: "⚡ ALL (Dev)" },
+];
+
 function Console() {
   const [online, setOnline] = useState(false);
   const [connected, setConnected] = useState(false);
   const [offers, setOffers] = useState<OfferEntry[]>([]);
   const [tripId, setTripId] = useState<string | null>(() => localStorage.getItem(TRIP_KEY));
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [myPos, setMyPos] = useState<LatLon | null>(null);
-  const [locNote, setLocNote] = useState<string | null>("Locating…");
+  const [myPos, setMyPos] = useState<LatLon>({ lat: 12.9352, lng: 77.6245 });
+  const [activeVehicle, setActiveVehicle] = useState("BIKE");
   const [me, setMe] = useState<DriverMe | null>(null);
 
   const onlineRef = useRef(online);
   onlineRef.current = online;
   const sockRef = useRef<DriverSocket | null>(null);
-  const posRef = useRef<LatLon | null>(null);
+  const posRef = useRef<LatLon>(myPos);
+  posRef.current = myPos;
+
   const loadMe = useCallback(() => {
     api
       .driverMe()
-      .then(setMe)
+      .then((data) => {
+        setMe(data);
+        if (data.profile?.vehicle_class) {
+          setActiveVehicle(data.profile.vehicle_class);
+        }
+      })
       .catch(() => undefined);
   }, []);
 
   useEffect(loadMe, [loadMe]);
 
-  // WS connection — fresh socket per ONLINE session so the server re-registers
-  // presence; offers ignored while OFFLINE.
+  // Sync online & vehicle class with backend
+  const updateDriverStatus = useCallback(async (isOnline: boolean, vc: string, pos?: LatLon) => {
+    try {
+      await api.updateStatus({
+        online: isOnline,
+        vehicleClass: vc,
+        lat: pos?.lat ?? posRef.current.lat,
+        lng: pos?.lng ?? posRef.current.lng,
+      });
+    } catch {}
+  }, []);
+
+  // WS connection per online session
   const [wsSession, setWsSession] = useState(0);
   useEffect(() => {
-    if (online) setWsSession((s) => s + 1);
-  }, [online]);
+    if (online) {
+      setWsSession((s) => s + 1);
+      void updateDriverStatus(true, activeVehicle, myPos);
+    } else {
+      void updateDriverStatus(false, activeVehicle, myPos);
+    }
+  }, [online, activeVehicle]);
 
   useEffect(() => {
     const token = getToken();
@@ -57,9 +98,11 @@ function Console() {
         } else if (msg.t === "dispatch.cancel") {
           setOffers((prev) => prev.filter((e) => e.offer.requestId !== msg.requestId));
         } else if (msg.t === "trip.state" && msg.state === "DRIVER_ASSIGNED") {
-          // Rider may have accepted OUR counter — the WS message carries no tripId,
-          // so recover it from the trips list (contract gap workaround).
-          if (!localStorage.getItem(TRIP_KEY)) {
+          if (msg.tripId) {
+            localStorage.setItem(TRIP_KEY, msg.tripId);
+            setTripId(msg.tripId);
+            setOffers([]);
+          } else {
             api
               .trips()
               .then((r) => {
@@ -84,52 +127,50 @@ function Console() {
     };
   }, [wsSession]);
 
-  // First push is staggered so the server finishes registering the fresh socket.
+  // Periodic position updates over WS while online
   useEffect(() => {
-    posRef.current = { lat: 12.9352, lng: 77.6245 }; // Bengaluru default until a GPS fix lands
-    setMyPos(posRef.current);
-    setLocNote("Using default location — enable GPS for real dispatch");
-    let watch: number | undefined;
-    if ("geolocation" in navigator) {
-      watch = navigator.geolocation.watchPosition(
-        (p) => {
-          posRef.current = { lat: p.coords.latitude, lng: p.coords.longitude };
-          setMyPos(posRef.current);
-          setLocNote(null);
-        },
-        () => undefined,
-        { enableHighAccuracy: true },
-      );
-    }
     const send = (): void => {
       const pos = posRef.current;
-      if (pos && onlineRef.current && sockRef.current?.readyState === WebSocket.OPEN) {
+      if (onlineRef.current && sockRef.current?.readyState === WebSocket.OPEN) {
         sockRef.current.send({ t: "pos.update", lat: pos.lat, lng: pos.lng });
       }
     };
-    const first = setTimeout(send, 1500);
+    const first = setTimeout(send, 1000);
     const iv = setInterval(send, 4000);
     return () => {
       clearTimeout(first);
       clearInterval(iv);
-      if (watch !== undefined) navigator.geolocation.clearWatch(watch);
     };
   }, []);
+
+  const handleLocationPick = (pos: LatLon): void => {
+    setMyPos(pos);
+    posRef.current = pos;
+    if (sockRef.current?.readyState === WebSocket.OPEN) {
+      sockRef.current.send({ t: "pos.update", lat: pos.lat, lng: pos.lng });
+    }
+    void updateDriverStatus(online, activeVehicle, pos);
+  };
+
+  const handleVehicleChange = (newVc: string): void => {
+    setActiveVehicle(newVc);
+    void updateDriverStatus(online, newVc, myPos);
+  };
 
   const removeOffer = useCallback((requestId: string) => {
     setOffers((prev) => prev.filter((e) => e.offer.requestId !== requestId));
   }, []);
 
-  function onAccepted(tripId: string): void {
+  function onAccepted(tripIdToSet: string): void {
     setOffers([]);
-    localStorage.setItem(TRIP_KEY, tripId);
-    setTripId(tripId);
+    localStorage.setItem(TRIP_KEY, tripIdToSet);
+    setTripId(tripIdToSet);
   }
 
   function onTripClosed(): void {
     localStorage.removeItem(TRIP_KEY);
     setTripId(null);
-    setDrawerOpen(true); // show fresh earnings after completion
+    setDrawerOpen(true);
     void api.driverMe().then(setMe).catch(() => undefined);
   }
 
@@ -145,23 +186,65 @@ function Console() {
       <header className="topbar">
         <div className="brand">
           Chalo-X<span className="x"> Driver</span>
+          <span className="badge">Console</span>
         </div>
-        <span className={"conn-dot" + (connected ? " ok" : "")} title={connected ? "live" : "offline"} />
+        <span className={"conn-dot" + (connected ? " ok" : "")} title={connected ? "WebSocket Connected" : "Connecting..."} />
+
+        <div className="vehicle-selector">
+          <span style={{ fontSize: 12 }}>Vehicle:</span>
+          <select value={activeVehicle} onChange={(e) => handleVehicleChange(e.target.value)}>
+            {VEHICLES.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="spacer" />
-        <div className={"toggle" + (online ? " online" : "")}>
-          <span className="label">{online ? "ONLINE" : "OFFLINE"}</span>
+
+        <div className={"toggle-wrap" + (online ? " online" : "")} onClick={() => setOnline((v) => !v)}>
+          <span className="toggle-label">{online ? "ONLINE" : "OFFLINE"}</span>
           <button
             aria-label="toggle online"
             className={"switch" + (online ? " on" : "")}
-            onClick={() => setOnline((v) => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOnline((v) => !v);
+            }}
           />
         </div>
+
         <button className="earnings-chip" onClick={() => setDrawerOpen(true)}>
-          <span>{me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} trips` : "Earnings"}</span>
+          <span>{me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}</span>
         </button>
       </header>
+
       <div className="map-wrap">
+        {/* Fullscreen interactive MapView rendered in background */}
+        <MapView me={myPos} stops={stops} onLocationPick={handleLocationPick} />
+
+        {/* Hotspot Presets Toolbar */}
+        {!tripId && (
+          <div className="location-bar">
+            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>POS:</span>
+            {HOTSPOTS.map((h) => (
+              <button
+                key={h.name}
+                type="button"
+                className={`loc-pill ${myPos.lat === h.pos.lat && myPos.lng === h.pos.lng ? "active" : ""}`}
+                onClick={() => handleLocationPick(h.pos)}
+              >
+                {h.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Active Trip Panel */}
         {tripId !== null && <TripPanel tripId={tripId} onFinished={onTripClosed} />}
+
+        {/* Incoming Offer Overlay Card */}
         {!tripId && top && (
           <OfferCard
             key={`${top.offer.requestId}:${top.offer.negotiationId ?? ""}`}
@@ -170,11 +253,22 @@ function Console() {
             onSkip={() => removeOffer(top.offer.requestId)}
           />
         )}
-        {!tripId && locNote && <div className="map-note">{locNote}</div>}
-        {tripId === null && offers.length === 0 && !locNote && (
-          <div className="map-note">{online ? "Waiting for ride requests…" : "Go ONLINE to receive ride requests"}</div>
+
+        {/* Status indicator when waiting */}
+        {!tripId && offers.length === 0 && (
+          <div className="map-status-pill">
+            {online ? (
+              <>
+                <span className="radar-ping" />
+                <span>Broadcasting live location ({activeVehicle}) — waiting for rides…</span>
+              </>
+            ) : (
+              <span>Tap switch above to go <strong>ONLINE</strong> and receive ride requests</span>
+            )}
+          </div>
         )}
       </div>
+
       {drawerOpen && <EarningsDrawer onClose={() => setDrawerOpen(false)} />}
     </div>
   );
@@ -198,4 +292,3 @@ export default function App() {
     </Routes>
   );
 }
-

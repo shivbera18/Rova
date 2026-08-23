@@ -3,16 +3,14 @@ import { formatINR, paisa, type TripView } from "@chalo/protocol";
 import { api } from "./api";
 
 const STATE_COPY: Record<string, string> = {
-  DRIVER_ASSIGNED: "Ride assigned — head to the pickup point",
-  ARRIVING: "Arriving at pickup",
-  ARRIVED: "At pickup — ask the rider for the OTP",
-  ONGOING: "Ride in progress",
-  COMPLETED: "Ride completed",
+  DRIVER_ASSIGNED: "Head to Pickup",
+  ARRIVING: "On the Way",
+  ARRIVED: "At Pickup — Ask for OTP",
+  ONGOING: "Ride in Progress",
+  COMPLETED: "Ride Finished",
+  CANCELLED_RIDER: "Rider Cancelled",
+  CANCELLED_DRIVER: "You Cancelled",
 };
-
-function navUrl(dest: { lat: number; lng: number }): string {
-  return `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lng}`;
-}
 
 export function TripPanel({
   tripId,
@@ -23,7 +21,6 @@ export function TripPanel({
 }) {
   const [trip, setTrip] = useState<TripView | null>(null);
   const [otp, setOtp] = useState("");
-  const [tip, setTip] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,7 +33,7 @@ export function TripPanel({
 
   useEffect(() => {
     refresh();
-    const iv = setInterval(refresh, 3000);
+    const iv = setInterval(refresh, 2500);
     return () => clearInterval(iv);
   }, [refresh]);
 
@@ -55,146 +52,128 @@ export function TripPanel({
 
   if (!trip) {
     return (
-      <div className="trip-panel">
-        <h3>Loading trip…</h3>
-        {err && <div className="err">{err}</div>}
+      <div className="trip-panel-overlay">
+        <h3 style={{ margin: 0 }}>Loading trip…</h3>
+        {err && <div className="error-text" style={{ marginTop: 8 }}>{err}</div>}
       </div>
     );
   }
 
   const fare = trip.fareBreakdown;
+  const isPickupPhase = trip.state === "DRIVER_ASSIGNED" || trip.state === "ARRIVING";
+  const navTarget = isPickupPhase ? trip.pickup : trip.drop;
 
   return (
-    <div className="trip-panel">
-      <h3>Trip in progress</h3>
-      <div className="trip-state-line">
-        Status: <b>{STATE_COPY[trip.state] ?? trip.state}</b>
-      </div>
-      <div className="stop pickup">
-        <span className="dot" />
+    <div className="trip-panel-overlay">
+      <div className="trip-status-header">
         <div>
-          {trip.pickup.lat.toFixed(5)}, {trip.pickup.lng.toFixed(5)}
-          <br />
-          <span>Pickup</span>
+          <span className="trip-status-badge">{STATE_COPY[trip.state] ?? trip.state}</span>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Trip ID: {trip.id.slice(0, 8)}</div>
         </div>
-      </div>
-      <div className="stop drop">
-        <span className="dot" />
-        <div>
-          {trip.drop.lat.toFixed(5)}, {trip.drop.lng.toFixed(5)}
-          <br />
-          <span>Drop</span>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 700 }}>Your Pay</div>
+          <div className="trip-pay-highlight">{fare ? formatINR(paisa(fare.agreedPaise)) : "—"}</div>
         </div>
-      </div>
-      <div className="trip-fare">
-        <span>
-          Your pay ({fare.mode === "NEGOTIATED" ? "negotiated" : "list"})
-          {fare.tipPaise > 0 ? ` + ${formatINR(paisa(fare.tipPaise))} tip` : ""}
-        </span>
-        <b>{formatINR(paisa(fare.agreedPaise + fare.tipPaise))}</b>
       </div>
 
-      {(trip.state === "DRIVER_ASSIGNED" || trip.state === "ARRIVING") && (
-        <div className="btn-row">
-          <button className="primary" onClick={() => window.open(navUrl(trip.pickup), "_blank")}>
-            Navigate to pickup
-          </button>
-          {trip.state === "DRIVER_ASSIGNED" ? (
-            <button
-              disabled={busy}
-              onClick={() =>
-                act(async () => {
-                  await api.tripState(tripId, "ARRIVING");
-                })
-              }
-            >
-              I'm on my way (ARRIVING)
-            </button>
-          ) : (
-            <button
-              className="good"
-              disabled={busy}
-              onClick={() =>
-                act(async () => {
-                  await api.tripState(tripId, "ARRIVED");
-                })
-              }
-            >
-              I've arrived (ARRIVED)
-            </button>
-          )}
+      <div className="trip-coords-box">
+        <div className="coord-row">
+          <span className="coord-dot pickup" />
+          <div>
+            <div className="coord-lbl">PICKUP POINT</div>
+            <div className="coord-text">{trip.pickup.lat.toFixed(5)}, {trip.pickup.lng.toFixed(5)}</div>
+          </div>
         </div>
+        <div className="coord-row">
+          <span className="coord-dot drop" />
+          <div>
+            <div className="coord-lbl">DROP DESTINATION</div>
+            <div className="coord-text">{trip.drop.lat.toFixed(5)}, {trip.drop.lng.toFixed(5)}</div>
+          </div>
+        </div>
+      </div>
+
+      {err && <div className="error-text" style={{ marginBottom: 12 }}>{err}</div>}
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+        <a
+          className="btn btn-counter"
+          style={{ textDecoration: "none" }}
+          href={`https://www.google.com/maps/dir/?api=1&destination=${navTarget.lat},${navTarget.lng}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          📍 Navigate to {isPickupPhase ? "Pickup" : "Drop"}
+        </a>
+      </div>
+
+      {trip.state === "DRIVER_ASSIGNED" && (
+        <button
+          className="btn btn-accept"
+          style={{ width: "100%" }}
+          disabled={busy}
+          onClick={() => act(() => api.tripState(trip.id, "ARRIVING"))}
+        >
+          🚀 I'm on my way (ARRIVING)
+        </button>
+      )}
+
+      {trip.state === "ARRIVING" && (
+        <button
+          className="btn btn-accept"
+          style={{ width: "100%" }}
+          disabled={busy}
+          onClick={() => act(() => api.tripState(trip.id, "ARRIVED"))}
+        >
+          📍 I have arrived at pickup
+        </button>
       )}
 
       {trip.state === "ARRIVED" && (
-        <form
-          className="btn-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void act(async () => {
-              await api.startTrip(tripId, otp.trim());
-            });
-          }}
-        >
-          <div className="otp-row">
-            <input
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              placeholder="OTP"
-              inputMode="numeric"
-              maxLength={6}
-              autoFocus
-            />
+        <div className="otp-box">
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+            Enter Passenger's 6-Digit OTP:
           </div>
-          <button className="good" type="submit" disabled={busy || otp.trim().length === 0}>
-            Start ride
+          <input
+            className="otp-input"
+            value={otp}
+            onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+            placeholder="······"
+            inputMode="numeric"
+            autoFocus
+          />
+          <button
+            className="btn btn-accept"
+            style={{ width: "100%", marginTop: 10 }}
+            disabled={busy || otp.length !== 6}
+            onClick={() => act(() => api.startTrip(trip.id, otp))}
+          >
+            ✓ Verify OTP & Start Ride
           </button>
-        </form>
+        </div>
       )}
 
       {trip.state === "ONGOING" && (
-        <form
-          className="btn-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const tipPaise = Math.max(0, Math.round(Number(tip || "0") * 100));
-            void act(async () => {
-              await api.completeTrip(tripId, Number.isFinite(tipPaise) ? tipPaise : 0);
-            });
-          }}
+        <button
+          className="btn btn-accept"
+          style={{ width: "100%" }}
+          disabled={busy}
+          onClick={() => act(() => api.completeTrip(trip.id, 0))}
         >
-          <button className="primary" type="button" onClick={() => window.open(navUrl(trip.drop), "_blank")}>
-            Navigate to drop
-          </button>
-          <div className="tip-row">
-            Tip (₹, optional)
-            <input value={tip} onChange={(e) => setTip(e.target.value)} inputMode="decimal" />
-          </div>
-          <button className="good" type="submit" disabled={busy}>
-            Complete ride
-          </button>
-        </form>
+          🏁 Complete Ride & Settle Pay
+        </button>
       )}
 
       {trip.state === "COMPLETED" && (
-        <div className="btn-row">
-          <div style={{ color: "var(--good)", fontWeight: 700 }}>
-            Ride complete — earnings updated.
+        <div>
+          <div style={{ background: "var(--good-dim)", color: "var(--good)", padding: 12, borderRadius: 10, textAlign: "center", fontWeight: 700, marginBottom: 12 }}>
+            ✓ Ride Complete — {fare ? formatINR(paisa(fare.agreedPaise)) : ""} credited to your wallet!
           </div>
-          <button className="primary" onClick={onFinished}>
-            Back online
+          <button className="btn btn-accept" style={{ width: "100%" }} onClick={onFinished}>
+            Back Online for Next Ride
           </button>
         </div>
       )}
-
-      {(trip.state === "CANCELLED_RIDER" || trip.state === "CANCELLED_DRIVER") && (
-        <div className="btn-row">
-          <div style={{ color: "var(--bad)" }}>This ride was cancelled.</div>
-          <button onClick={onFinished}>Close</button>
-        </div>
-      )}
-
-      {err && <div className="err">{err}</div>}
     </div>
   );
 }

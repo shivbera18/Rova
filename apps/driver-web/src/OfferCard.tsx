@@ -1,22 +1,27 @@
 import { useEffect, useState } from "react";
-import { formatINR, paisa, type DriverOfferPayload } from "@chalo/protocol";
+import { formatINR, paisa } from "@chalo/protocol";
 import { api, type Offer } from "./api";
 
 export interface OfferEntry {
-  offer: DriverOfferPayload;
-  ttlMs: number; // total countdown at receipt
+  offer: Offer;
+  ttlMs: number;
 }
 
-function useRemaining(expiresAt: string): number {
-  const [left, setLeft] = useState(() => Math.max(0, new Date(expiresAt).getTime() - Date.now()));
-  useEffect(() => {
-    const iv = setInterval(
-      () => setLeft(Math.max(0, new Date(expiresAt).getTime() - Date.now())),
-      250,
-    );
-    return () => clearInterval(iv);
-  }, [expiresAt]);
-  return left;
+function playChime(): void {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch {}
 }
 
 export function OfferCard({
@@ -28,128 +33,174 @@ export function OfferCard({
   onAccept: (tripId: string) => void;
   onSkip: () => void;
 }) {
-  const o = entry.offer;
-  const left = useRemaining(o.expiresAt);
+  const { offer, ttlMs } = entry;
+  const [seconds, setSeconds] = useState(() => Math.ceil(ttlMs / 1000));
+  const [showCounter, setShowCounter] = useState(false);
+  const [counterInput, setCounterInput] = useState(() => (offer.takeHomePaise / 100 + 20).toString());
   const [busy, setBusy] = useState(false);
-  const [countering, setCountering] = useState(false);
-  const [counterVal, setCounterVal] = useState("");
-  const [err, setErr] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const pct = Math.min(100, (left / Math.max(entry.ttlMs, 1)) * 100);
-  const negotiationId = o.negotiationId;
-
+  // Play alert chime on arrival
   useEffect(() => {
-    if (left <= 0) onSkip(); // expired — drop it
-  }, [left, onSkip]);
+    playChime();
+  }, [offer.requestId]);
 
-  async function accept() {
-    if (!negotiationId) return;
+  // Countdown timer
+  useEffect(() => {
+    const end = Date.now() + ttlMs;
+    const iv = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      setSeconds(remaining);
+      if (remaining <= 0) {
+        clearInterval(iv);
+        onSkip();
+      }
+    }, 250);
+    return () => clearInterval(iv);
+  }, [ttlMs, onSkip]);
+
+  const accept = async (): Promise<void> => {
     setBusy(true);
-    setErr(null);
+    setError(null);
     try {
-      const r = await api.acceptNegotiation(negotiationId);
-      onAccept(r.tripId);
+      if (offer.negotiationId) {
+        const res = await api.acceptNegotiation(offer.negotiationId);
+        onAccept(res.tripId);
+      } else {
+        const res = await api.acceptRequest(offer.requestId);
+        onAccept(res.tripId);
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not accept");
+      setError(e instanceof Error ? e.message : "Accept failed");
       setBusy(false);
     }
-  }
+  };
 
-  async function counter(e: React.FormEvent) {
-    e.preventDefault();
-    if (!negotiationId) return;
-    const paise = Math.round(Number(counterVal) * 100);
-    if (!Number.isFinite(paise) || paise <= o.takeHomePaise) {
-      setErr(`Your counter must be above ${formatINR(paisa(o.takeHomePaise))} — that is the current offer.`);
+  const submitCounter = async (amountRupees: number): Promise<void> => {
+    if (!offer.negotiationId) return;
+    const paise = Math.round(amountRupees * 100);
+    if (paise <= offer.takeHomePaise) {
+      setError("Counter must be higher than current offer");
       return;
     }
     setBusy(true);
-    setErr(null);
+    setError(null);
     try {
-      await api.counterNegotiation(negotiationId, paise);
-      onSkip(); // ball in rider's court — clear our card
-    } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "Counter failed");
+      await api.counterNegotiation(offer.negotiationId, paise);
+      setShowCounter(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Counter failed");
       setBusy(false);
     }
-  }
+  };
 
-  const secs = Math.ceil(left / 1000);
+  const currentRupees = offer.takeHomePaise / 100;
+  const progressPct = Math.max(0, Math.min(100, (seconds / (ttlMs / 1000)) * 100));
 
   return (
-    <div className="offer-card">
-      <div className="offer-timer" style={{ width: `${pct}%` }} />
-      <div className="offer-head">
-        <span className={o.isCounter ? "tag counter" : "tag"}>
-          {o.isCounter ? `RIDER FINAL · ROUND ${o.round}` : o.negotiationId ? `OFFER · ROUND ${o.round}` : "LIST-PRICE RIDE"}
-        </span>
-        <span className="secs">expires in {secs}s</span>
+    <div className="offer-card-overlay">
+      <div className="offer-header">
+        <div className="offer-badge">
+          <span>⚡</span>
+          <span>{offer.isCounter ? `Rider Final · R${offer.round}` : `Offer · R${offer.round}`}</span>
+        </div>
+        <div className="countdown-badge">⏱ {seconds}s</div>
       </div>
-      <div className="take-home">
-        {formatINR(paisa(o.takeHomePaise))} <small>your take-home</small>
+
+      <div className="progress-line-track">
+        <div className="progress-line-fill" style={{ width: `${progressPct}%` }} />
       </div>
-      <div className="offer-hint">
-        {o.riderName} · ★ {o.riderRating.toFixed(1)} · pays {o.paymentMethod}
-        {o.isCounter ? " — accept to lock it in" : " — your counter IS your pay, ask for more"}
-      </div>
-      <div className="offer-meta">
+
+      <div className="offer-amount-row">
         <div>
-          Pickup
-          <b>{o.pickupKm.toFixed(1)} km</b>
+          <div className="offer-amount-label">YOUR TAKE-HOME PAY</div>
+          <div className="offer-amount-val">{formatINR(paisa(offer.takeHomePaise))}</div>
         </div>
-        <div>
-          Trip
-          <b>{o.tripKm.toFixed(1)} km</b>
-        </div>
-        <div>
-          Per km
-          <b>{formatINR(paisa(Math.round(o.takeHomePaise / Math.max(o.tripKm, 0.1))))}</b>
+        <div style={{ textAlign: "right" }}>
+          <div className="offer-amount-label">PAYMENT</div>
+          <div style={{ fontWeight: 800, color: "#10b981", fontSize: 13 }}>{offer.paymentMethod}</div>
         </div>
       </div>
-      {err && <div className="err">{err}</div>}
-      {countering && negotiationId ? (
-        <form className="counter-row" onSubmit={counter}>
-          <input
-            autoFocus
-            value={counterVal}
-            onChange={(e) => setCounterVal(e.target.value)}
-            placeholder={`more than ₹${(o.takeHomePaise / 100).toFixed(0)}`}
-            inputMode="decimal"
-            disabled={busy}
-          />
-          <button type="submit" className="primary" disabled={busy || !negotiationId}>
-            Send counter
-          </button>
-          <button type="button" className="ghost" onClick={() => setCountering(false)} disabled={busy}>
-            Back
-          </button>
-        </form>
-      ) : (
-        <div className="offer-actions">
-          <button
-            className="good"
-            onClick={accept}
-            disabled={busy || !negotiationId || left <= 0}
-            style={{ flex: 1.4 }}
-          >
-            {negotiationId ? "ACCEPT RIDE" : "LIST RIDE — NO ACCEPT API"}
-          </button>
-          <button
-            className="primary"
-            onClick={() => {
-              setErr(null);
-              setCountering(true);
-            }}
-            disabled={busy || !negotiationId || left <= 0}
-            style={{ flex: 1 }}
-          >
-            COUNTER
-          </button>
-          <button className="ghost" onClick={onSkip} disabled={busy} style={{ flex: 0.8 }}>
-            Skip
-          </button>
+
+      <div className="offer-subtitle">
+        <span>👤 {offer.riderName || "Rider"}</span>
+        <span>·</span>
+        <span>★ {offer.riderRating ? offer.riderRating.toFixed(1) : "4.8"}</span>
+        <span>·</span>
+        <span style={{ color: "var(--accent)" }}>100% of this pay is yours</span>
+      </div>
+
+      <div className="offer-stats-grid">
+        <div className="stat-box">
+          <div className="num">{offer.pickupKm} km</div>
+          <div className="lbl">Pickup Dist</div>
         </div>
-      )}
+        <div className="stat-box">
+          <div className="num">{offer.tripKm} km</div>
+          <div className="lbl">Trip Dist</div>
+        </div>
+        <div className="stat-box">
+          <div className="num">₹{Math.round((offer.takeHomePaise / 100) / Math.max(offer.tripKm, 0.5))}</div>
+          <div className="lbl">Rate / km</div>
+        </div>
+      </div>
+
+      {error && <div className="error-text" style={{ marginBottom: 12, fontSize: 12 }}>{error}</div>}
+
+      {showCounter && offer.negotiationId ? (
+        <div className="counter-box">
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-dim)" }}>
+            Propose Your Desired Take-Home:
+          </div>
+          <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
+            {[10, 20, 30, 50].map((inc) => (
+              <button
+                key={inc}
+                className="loc-pill"
+                type="button"
+                onClick={() => setCounterInput((currentRupees + inc).toString())}
+              >
+                +₹{inc}
+              </button>
+            ))}
+          </div>
+          <div className="counter-input-row">
+            <span>₹</span>
+            <input
+              type="number"
+              value={counterInput}
+              onChange={(e) => setCounterInput(e.target.value)}
+              placeholder={`> ₹${currentRupees}`}
+              autoFocus
+            />
+            <button
+              className="btn btn-accept"
+              style={{ flex: "0 0 auto", padding: "10px 16px" }}
+              disabled={busy || Number(counterInput) <= currentRupees}
+              onClick={() => void submitCounter(Number(counterInput))}
+            >
+              Send ₹{counterInput}
+            </button>
+            <button className="btn btn-skip" onClick={() => setShowCounter(false)}>
+              ✕
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="offer-actions">
+        <button className="btn btn-accept" disabled={busy} onClick={() => void accept()}>
+          ✓ Accept {formatINR(paisa(offer.takeHomePaise))}
+        </button>
+        {offer.negotiationId && !showCounter && (
+          <button className="btn btn-counter" disabled={busy} onClick={() => setShowCounter(true)}>
+            💬 Counter
+          </button>
+        )}
+        <button className="btn btn-skip" disabled={busy} onClick={onSkip} title="Skip this request">
+          Skip
+        </button>
+      </div>
     </div>
   );
 }

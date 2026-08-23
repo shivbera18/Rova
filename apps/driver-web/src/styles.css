@@ -547,3 +547,22 @@ h3 {
   .offer-card-overlay, .trip-panel-overlay { bottom: 10px; }
   .vehicle-selector { flex: 1; }
 }
+
+.vehicle-lock-note { margin: 7px 0 12px; padding: 7px 9px; border: 2px solid var(--ink); border-radius: 7px; background: var(--yellow); font-size: 10px; font-weight: 800; }
+.vehicle-identity { display: flex; align-items: center; gap: 7px; padding: 5px 9px; border: 2px solid var(--ink); border-radius: 9px; background: #fff; box-shadow: 2px 2px 0 var(--ink); }
+.vehicle-identity > span:first-child { font-size: 20px; }
+.vehicle-identity small, .vehicle-identity strong { display: block; line-height: 1.1; }
+.vehicle-identity small { font-size: 7px; letter-spacing: .08em; font-weight: 900; }
+.vehicle-identity strong { font-size: 11px; margin-top: 2px; }
+.vehicle-lock { font-size: 10px !important; }
+
+@media (max-width: 720px) {
+  html, body, #root { overflow: hidden; }
+  .topbar { min-height: 58px; gap: 7px; }
+  .vehicle-identity { order: 3; }
+  .vehicle-identity small { display: none; }
+  .vehicle-identity strong { font-size: 9px; }
+  .map-status-pill { bottom: 12px; width: calc(100% - 20px); }
+  .location-bar { top: 8px; }
+  .offer-card-overlay, .trip-panel-overlay { width: calc(100% - 16px); bottom: 8px; max-height: 74%; overflow-y: auto; }
+}

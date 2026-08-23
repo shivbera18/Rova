@@ -44,10 +44,10 @@ async function call<T>(path: string, method: string, body?: unknown): Promise<T>
 export const api = {
   sendOtp: (phone: string) =>
     call<{ sent: boolean; devHint?: string }>("/v1/auth/otp/send", "POST", { phone }),
-  verifyOtp: (phone: string, otp: string) =>
-    call<AuthSession>("/v1/auth/otp/verify", "POST", { phone, otp, role: "DRIVER" }),
-  passwordLogin: (phone: string, password: string, role: "DRIVER" | "RIDER") =>
-    call<AuthSession>("/v1/auth/login/password", "POST", { phone, password, role }),
+  verifyOtp: (phone: string, otp: string, vehicleClass: string) =>
+    call<AuthSession>("/v1/auth/otp/verify", "POST", { phone, otp, role: "DRIVER", vehicleClass }),
+  passwordLogin: (phone: string, password: string, role: "DRIVER" | "RIDER", vehicleClass: string) =>
+    call<AuthSession>("/v1/auth/login/password", "POST", { phone, password, role, vehicleClass }),
   driverMe: () =>
     call<{
       profile: { vehicle_class: string; plate: string; kyc_status: string; online: boolean } | null;

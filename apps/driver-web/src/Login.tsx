@@ -10,6 +10,7 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
   const [step, setStep] = useState<Step>("PHONE");
   const [phone, setPhone] = useState("+919900000101");
   const [otp, setOtp] = useState("");
+  const [vehicleClass, setVehicleClass] = useState("BIKE");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -20,7 +21,7 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
     setErr(null);
     try {
       if (mode === "PASSWORD") {
-        const sess = await api.passwordLogin(phone, password, "DRIVER");
+        const sess = await api.passwordLogin(phone, password, "DRIVER", vehicleClass);
         if (sess.role !== "DRIVER") throw new Error("This account is not a driver");
         setToken(sess.token);
         localStorage.setItem("chalox.driver.seenLanding", "1");
@@ -29,7 +30,7 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
         await api.sendOtp(phone);
         setStep("OTP");
       } else {
-        const sess = await api.verifyOtp(phone, otp);
+        const sess = await api.verifyOtp(phone, otp, vehicleClass);
         if (sess.role !== "DRIVER") throw new Error("This account is not a driver");
         setToken(sess.token);
         localStorage.setItem("chalox.driver.seenLanding", "1");
@@ -85,6 +86,21 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
             </>
           )}
 
+          <label className="step-label" htmlFor="vehicle">Register one vehicle</label>
+          <select
+            id="vehicle"
+            className="brut-select"
+            value={vehicleClass}
+            onChange={(e) => setVehicleClass(e.target.value)}
+            disabled={busy}
+          >
+            <option value="BIKE">🏍️ Bike</option>
+            <option value="AUTO">🛺 Auto</option>
+            <option value="CAB_MINI">🚗 Cab Mini</option>
+            <option value="CAB_PRIME">🚘 Cab Prime</option>
+            <option value="CAB_XL">🚙 Cab XL</option>
+          </select>
+          <p className="vehicle-lock-note">🔒 One vehicle per account. Changes require document review.</p>
           {mode === "PASSWORD" && (
             <>
               <label className="step-label" htmlFor="dpass">Password</label>

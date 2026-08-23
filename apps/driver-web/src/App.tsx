@@ -19,15 +19,6 @@ const HOTSPOTS: Array<{ name: string; pos: LatLon }> = [
   { name: "📍 Airport", pos: { lat: 13.1986, lng: 77.7066 } },
 ];
 
-const VEHICLES = [
-  { id: "ALL", label: "⚡ ALL (Dev Mode)" },
-  { id: "BIKE", label: "🏍️ Bike" },
-  { id: "BIKE_LITE", label: "🛵 Bike Lite" },
-  { id: "AUTO", label: "🛺 Auto" },
-  { id: "CAB_MINI", label: "🚗 Mini" },
-  { id: "CAB_PRIME", label: "🚘 Prime" },
-  { id: "CAB_XL", label: "🚙 XL" },
-];
 
 function Console() {
   const [online, setOnline] = useState(false);
@@ -36,7 +27,7 @@ function Console() {
   const [tripId, setTripId] = useState<string | null>(() => localStorage.getItem(TRIP_KEY));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [myPos, setMyPos] = useState<LatLon>({ lat: 12.9352, lng: 77.6245 });
-  const [activeVehicle, setActiveVehicle] = useState("ALL");
+  const [activeVehicle, setActiveVehicle] = useState("BIKE");
   const [me, setMe] = useState<DriverMe | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
 
@@ -55,6 +46,7 @@ function Console() {
       .then((data) => {
         setMe(data);
         setSessionReady(true);
+        if (data.profile?.vehicle_class) setActiveVehicle(data.profile.vehicle_class);
       })
       .catch(() => {
         // api.ts purges stale tokens and dispatches "storage" on 401/403.
@@ -65,27 +57,25 @@ function Console() {
 
   useEffect(loadMe, [loadMe]);
 
-  const updateDriverStatus = useCallback(async (isOnline: boolean, vc: string, pos?: LatLon) => {
+  const updateDriverStatus = useCallback(async (isOnline: boolean, pos?: LatLon) => {
     try {
       await api.updateStatus({
         online: isOnline,
-        vehicleClass: vc,
         lat: pos?.lat ?? posRef.current.lat,
         lng: pos?.lng ?? posRef.current.lng,
       });
     } catch {}
   }, []);
-
   const [wsSession, setWsSession] = useState(0);
   useEffect(() => {
     if (!sessionReady) return;
     if (online) {
       setWsSession((s) => s + 1);
-      void updateDriverStatus(true, activeVehicle, myPos);
+      void updateDriverStatus(true, myPos);
     } else {
-      void updateDriverStatus(false, activeVehicle, myPos);
+      void updateDriverStatus(false, myPos);
     }
-  }, [online, activeVehicle, sessionReady]);
+  }, [online, sessionReady]);
 
   useEffect(() => {
     const token = getToken();
@@ -154,12 +144,7 @@ function Console() {
     if (sockRef.current?.readyState === WebSocket.OPEN) {
       sockRef.current.send({ t: "pos.update", lat: pos.lat, lng: pos.lng });
     }
-    void updateDriverStatus(online, activeVehicle, pos);
-  };
-
-  const handleVehicleChange = (newVc: string): void => {
-    setActiveVehicle(newVc);
-    void updateDriverStatus(online, newVc, myPos);
+    void updateDriverStatus(online, pos);
   };
 
   const removeOffer = useCallback((requestId: string) => {
@@ -197,15 +182,14 @@ function Console() {
         </div>
         <span className={"conn-dot" + (connected ? " ok" : "")} title={connected ? "Connected" : "Disconnected"} />
 
-        <div className="vehicle-selector">
-          <span style={{ fontSize: 12, fontWeight: 800 }}>VEHICLE</span>
-          <select className="brut-select" style={{ width: "auto", padding: "6px 10px" }} value={activeVehicle} onChange={(e) => handleVehicleChange(e.target.value)}>
-            {VEHICLES.map((v) => (
-              <option key={v.id} value={v.id}>{v.label}</option>
-            ))}
-          </select>
+        <div className="vehicle-identity" title="Vehicle is fixed to this driver account">
+          <span>{activeVehicle === "BIKE" ? "🏍️" : activeVehicle === "AUTO" ? "🛺" : "🚗"}</span>
+          <div>
+            <small>REGISTERED VEHICLE</small>
+            <strong>{activeVehicle.replaceAll("_", " ")}</strong>
+          </div>
+          <span className="vehicle-lock">🔒</span>
         </div>
-
         <div style={{ flex: 1 }} />
 
         <div className={`toggle-wrap${online ? " online" : ""}`} onClick={() => setOnline((v) => !v)}>
@@ -270,7 +254,7 @@ function Console() {
             {online ? (
               <>
                 <span className="radar-ping" />
-                <span><strong>LIVE</strong> · Waiting for {activeVehicle === "ALL" ? "all ride types" : activeVehicle} near Koramangala…</span>
+                <span><strong>LIVE</strong> · Waiting for {activeVehicle.replaceAll("_", " ")} requests near your position…</span>
               </>
             ) : (
               <span>Flip the switch to go <strong>ONLINE</strong> and receive requests</span>

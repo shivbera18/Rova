@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Star as MarqueeStar, TriangleAlert } from "lucide-react";
 
 /* =========================================================================
    Neobrutalism UI Component Kit (Inspired by neobrutalism.dev / Retro UI)
@@ -122,8 +123,8 @@ export const NeoInput = React.forwardRef<HTMLInputElement, NeoInputProps>(
         )}
         <input ref={ref} id={inputId} className={`brut-input ${className}`.trim()} style={style} {...props} />
         {error && (
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--red)", marginTop: 4 }}>
-            ⚠️ {error}
+          <div className="error-text" style={{ marginTop: 4, fontSize: 11, fontWeight: 700 }} role="alert">
+            <TriangleAlert size={12} /> {error}
           </div>
         )}
       </div>
@@ -217,7 +218,7 @@ export function NeoMarquee({ items, speed = 20 }: { items: string[]; speed?: num
             {items.map((item, idx) => (
               <React.Fragment key={idx}>
                 <span style={{ color: "#ffffff" }}>{item}</span>
-                <span style={{ color: "var(--secondary)" }}>★</span>
+              <span style={{ color: "var(--secondary)", display: "inline-flex" }}><MarqueeStar size={14} /></span>
               </React.Fragment>
             ))}
           </span>

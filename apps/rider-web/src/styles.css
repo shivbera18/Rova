@@ -319,7 +319,12 @@ h4 {
   font-size: 12.5px;
   padding: 8px 12px;
   margin: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+
+.error-text svg { flex: 0 0 auto; }
 
 .ok-text {
   color: #065f46;
@@ -329,7 +334,12 @@ h4 {
   font-weight: 700;
   font-size: 12.5px;
   padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+
+.ok-text svg { flex: 0 0 auto; }
 
 .booking-divider {
   display: flex;
@@ -392,6 +402,9 @@ h4 {
   padding: 7px 12px;
   border-radius: var(--radius-sm);
   border: 1.5px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
   cursor: pointer;
   transition: all 0.08s ease;
@@ -619,6 +632,10 @@ h4 {
   font-weight: 700;
   font-size: 12.5px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 /* Quotes List */

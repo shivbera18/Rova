@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { Bell, Car, LogOut, ReceiptText, ShieldCheck } from "lucide-react";
 import { getToken, setToken } from "./api";
 import Login from "./screens/Login";
 import { Landing } from "./components/Landing";
@@ -31,16 +32,16 @@ function RiderConsole({
         </Link>
         <nav className="row" style={{ marginLeft: "auto", gap: 6 }}>
           <NavLink to="/book" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>
-            🚗 Book
+            <Car size={15} /> Book
           </NavLink>
           <NavLink to="/history" className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>
-            🧾 Trips
+            <ReceiptText size={15} /> Trips
           </NavLink>
           <button className="navlink" onClick={() => setSafetyOpen(true)}>
-            🛡️ Safety
+            <ShieldCheck size={15} /> Safety
           </button>
           <button className="navlink" onClick={logout}>
-            🚪 Logout
+            <LogOut size={15} /> Logout
           </button>
         </nav>
         {pushSupported() && pushState !== "granted" && (
@@ -48,7 +49,7 @@ function RiderConsole({
             className="brut-btn brut-btn-white brut-btn-sm desktop-alert"
             onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
           >
-            🔔 Alerts
+            <Bell size={14} /> Alerts
           </button>
         )}
       </header>

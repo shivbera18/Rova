@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatINR, paisa } from "@chalo/protocol";
+import { Rocket, TriangleAlert } from "lucide-react";
 import { useCountdown } from "../ws";
 import { riderAccept, riderDecline, riderFinal } from "../api";
 import { vehicleLabel } from "./OfferSheet";
@@ -117,8 +118,8 @@ export default function CounterModal({
         </NeoCard>
 
         {error && (
-          <div className="error-text" style={{ marginBottom: 14 }}>
-            ⚠️ {error}
+          <div className="error-text" style={{ marginBottom: 14 }} role="alert">
+            <TriangleAlert size={14} /> {error}
           </div>
         )}
 
@@ -130,7 +131,7 @@ export default function CounterModal({
               disabled={busy}
               onClick={() => void handleAccept()}
             >
-              Accept {formatINR(paisa(counter.paise))} Deal 🚀
+              <Rocket size={15} /> Accept {formatINR(paisa(counter.paise))} Deal
             </NeoButton>
 
             <div className="booking-divider"><span>OR PROPOSE FINAL COUNTER</span></div>

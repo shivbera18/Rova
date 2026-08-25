@@ -2,6 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LatLon, RiderWsMessage } from "@chalo/protocol";
 import { distanceKm } from "@chalo/protocol";
 import { formatINR, paisa } from "@chalo/protocol";
+import {
+  ArrowUpRight,
+  Banknote,
+  CircleCheck,
+  Clock,
+  KeyRound,
+  LocateFixed,
+  Radar,
+  RefreshCw,
+  Rocket,
+  Star,
+  Timer,
+  TriangleAlert,
+  Wallet as WalletIcon,
+  Zap,
+} from "lucide-react";
 import MapView from "../components/MapView";
 import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet";
 import { LocationSearch, type SelectedPlace } from "../components/LocationSearch";
@@ -48,24 +64,28 @@ function readRoutes(key: string): StoredRoute[] {
 
 const PAY_METHODS = ["UPI", "WALLET", "CASH"] as const;
 const MATCH_TOTAL_S = 45;
-const POPULAR_ROUTES: Array<{ label: string; pickup: LatLon; drop: LatLon }> = [
+const POPULAR_ROUTES: Array<{ from: string; to: string; pickup: LatLon; drop: LatLon }> = [
   {
-    label: "⚡ Koramangala ➔ Jayanagar",
+    from: "Koramangala",
+    to: "Jayanagar",
     pickup: { lat: 12.9352, lng: 77.6245 },
     drop: { lat: 12.9308, lng: 77.5838 },
   },
   {
-    label: "⚡ Koramangala ➔ Indiranagar",
+    from: "Koramangala",
+    to: "Indiranagar",
     pickup: { lat: 12.9352, lng: 77.6245 },
     drop: { lat: 12.9784, lng: 77.6408 },
   },
   {
-    label: "⚡ MG Road ➔ HSR Layout",
+    from: "MG Road",
+    to: "HSR Layout",
     pickup: { lat: 12.9757, lng: 77.6068 },
     drop: { lat: 12.9116, lng: 77.6474 },
   },
   {
-    label: "⚡ Indiranagar ➔ Airport",
+    from: "Indiranagar",
+    to: "Airport",
     pickup: { lat: 12.9784, lng: 77.6408 },
     drop: { lat: 13.1986, lng: 77.7066 },
   },
@@ -310,13 +330,11 @@ export default function Book(): React.ReactElement {
   }
 
   async function selectPopularRoute(route: typeof POPULAR_ROUTES[0]): Promise<void> {
-    const from = route.label.split("➔")[0]?.replace("⚡", "").trim() ?? "Pickup";
-    const to = route.label.split("➔")[1]?.trim() ?? "Drop-off";
     setPickup(route.pickup);
-    setPickupLabel(from);
+    setPickupLabel(route.from);
     setDrop(route.drop);
-    setDropLabel(to);
-    rememberRecent(route.pickup, route.drop, from, to);
+    setDropLabel(route.to);
+    rememberRecent(route.pickup, route.drop, route.from, route.to);
     await loadQuotesForRoute(route.pickup, route.drop);
   }
 
@@ -384,7 +402,8 @@ export default function Book(): React.ReactElement {
     <div className="book-wrap">
       {!wsConnected && (
         <div className="connection-banner">
-          <span>⚡ Live updates reconnecting...</span>
+          <TriangleAlert size={14} />
+          <span>Live updates reconnecting — fares may be stale</span>
         </div>
       )}
 
@@ -399,8 +418,8 @@ export default function Book(): React.ReactElement {
 
       <div className="side-panel">
         {error && (
-          <div className="error-text" style={{ marginBottom: 12 }}>
-            ⚠️ {error}
+          <div className="error-text" style={{ marginBottom: 12 }} role="alert">
+            <TriangleAlert size={14} /> {error}
           </div>
         )}
 
@@ -459,15 +478,15 @@ export default function Book(): React.ReactElement {
                 );
               }}
             >
-              ◎ Use my current location
+              <LocateFixed size={15} /> Use my current location
             </button>
 
             <div className="booking-divider"><span>POPULAR ROUTES</span></div>
             <div className="quick-places-row">
               {POPULAR_ROUTES.map((r) => (
-                <button key={r.label} type="button" className="saved-route" onClick={() => void selectPopularRoute(r)}>
-                  <span>↗</span>
-                  <small>{r.label.replace("⚡ ", "")}</small>
+                <button key={`${r.from}-${r.to}`} type="button" className="saved-route" onClick={() => void selectPopularRoute(r)}>
+                  <ArrowUpRight size={14} />
+                  <small>{`${r.from} → ${r.to}`}</small>
                 </button>
               ))}
             </div>
@@ -478,7 +497,7 @@ export default function Book(): React.ReactElement {
                 <div className="quick-places-row">
                   {recentRoutes.slice(0, 3).map((route) => (
                     <button key={route.id} type="button" className="saved-route" onClick={() => void selectStoredRoute(route)}>
-                      <span>↻</span>
+                      <Clock size={14} />
                       <small>{route.label}</small>
                     </button>
                   ))}
@@ -490,15 +509,18 @@ export default function Book(): React.ReactElement {
               <div style={{ width: "100%" }}>
                 <span className="option-label">PAYMENT METHOD</span>
                 <div className="payment-group">
-                  {PAY_METHODS.map((pm) => (
-                    <button
-                      key={pm}
-                      className={`payment-pill ${payMethod === pm ? "selected" : ""}`}
-                      onClick={() => setPayMethod(pm)}
-                    >
-                      {pm === "UPI" ? "⚡ UPI" : pm === "WALLET" ? "▣ Wallet" : "₹ Cash"}
-                    </button>
-                  ))}
+                  {PAY_METHODS.map((pm) => {
+                    const Icon = pm === "UPI" ? Zap : pm === "WALLET" ? WalletIcon : Banknote;
+                    return (
+                      <button
+                        key={pm}
+                        className={`payment-pill ${payMethod === pm ? "selected" : ""}`}
+                        onClick={() => setPayMethod(pm)}
+                      >
+                        <Icon size={13} /> {pm === "WALLET" ? "Wallet" : pm}
+                      </button>
+                    );
+                  })}
                 </div>
                 {payMethod === "WALLET" && (
                   <div className="row" style={{ justifyContent: "space-between", marginTop: 8 }}>
@@ -537,27 +559,32 @@ export default function Book(): React.ReactElement {
             </div>
 
             <div className="col" style={{ gap: 8 }}>
-              {phase.quotes.map((q) => (
-                <div
-                  key={q.vehicleClass}
-                  className="quote-row"
-                  onClick={() => setPhase({ k: "offer", quote: q })}
-                >
-                  <div className="quote-class">
-                    <span style={{ fontSize: 24 }}>{vehicleIcon(q.vehicleClass)}</span>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 14.5 }}>{vehicleLabel(q.vehicleClass)}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--ink-muted)", fontWeight: 600 }}>
-                        {q.distanceKm} km · ~{q.etaMin} min ETA
+              {phase.quotes.map((q) => {
+                const QIcon = vehicleIcon(q.vehicleClass);
+                return (
+                  <div
+                    key={q.vehicleClass}
+                    className="quote-row"
+                    onClick={() => setPhase({ k: "offer", quote: q })}
+                  >
+                    <div className="quote-class">
+                      <span style={{ display: "grid", placeItems: "center", width: 34, height: 34, border: "var(--brut-border-thin)", borderRadius: "var(--radius-sm)", background: "var(--paper-subtle)" }}>
+                        <QIcon size={20} strokeWidth={2.2} />
+                      </span>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 14.5 }}>{vehicleLabel(q.vehicleClass)}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--ink-muted)", fontWeight: 600 }}>
+                          {q.distanceKm} km · ~{q.etaMin} min ETA
+                        </div>
                       </div>
                     </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div className="quote-price">{formatINR(paisa(q.listPrice))}</div>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--primary)" }}>Name your offer →</div>
+                    </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div className="quote-price">{formatINR(paisa(q.listPrice))}</div>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--primary)" }}>Name your offer →</div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </NeoCard>
         )}
@@ -580,9 +607,13 @@ export default function Book(): React.ReactElement {
         {phase.k === "matching" && !matchExpired && (
           <NeoCard elevation="md" style={{ padding: 22 }}>
             <div className="spread" style={{ marginBottom: 12 }}>
-              <span className="eyebrow">RADAR ACTIVE</span>
+              <span className="eyebrow"><Radar size={13} style={{ verticalAlign: -2 }} /> RADAR ACTIVE</span>
               <NeoBadge variant={matchSecs !== null && matchSecs <= 10 ? "red" : "green"}>
-                {matchSecs !== null ? `⏱ ${matchSecs}s` : "SEARCHING"}
+                {matchSecs !== null ? (
+                  <span className="row" style={{ gap: 4, alignItems: "center" }}>
+                    <Timer size={12} /> {matchSecs}s
+                  </span>
+                ) : "SEARCHING"}
               </NeoBadge>
             </div>
             <h3 style={{ fontSize: 20, marginBottom: 6 }}>Connecting With Drivers...</h3>
@@ -669,8 +700,8 @@ export default function Book(): React.ReactElement {
 
             {phase.trip.otp && (
               <div className="otp-display">
-                <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
-                  Start OTP for Driver
+                <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
+                  <KeyRound size={12} /> Start OTP for Driver
                 </div>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
                   {phase.trip.otp}
@@ -685,7 +716,7 @@ export default function Book(): React.ReactElement {
                 style={{ marginTop: phase.trip.otp ? 0 : 12 }}
                 onClick={() => void handleRegenerateOtp()}
               >
-                ⟳ Show new start code
+                <RefreshCw size={14} /> Show new start code
               </button>
             )}
 
@@ -749,7 +780,7 @@ export default function Book(): React.ReactElement {
             <div className="booking-divider"><span>RATE YOUR DRIVER</span></div>
             {rated ? (
               <div className="ok-text" style={{ marginBottom: 14 }}>
-                ✓ Thanks — your rating helps other riders
+                <CircleCheck size={14} /> Thanks — your rating helps other riders
               </div>
             ) : (
               <div style={{ marginBottom: 14 }}>
@@ -764,7 +795,7 @@ export default function Book(): React.ReactElement {
                       className={`star-btn ${n <= ratingVal ? "on" : ""}`}
                       onClick={() => setRatingVal(n)}
                     >
-                      ★
+                      <Star size={20} fill={n <= ratingVal ? "currentColor" : "none"} />
                     </button>
                   ))}
                 </div>
@@ -784,7 +815,7 @@ export default function Book(): React.ReactElement {
             <div className="booking-divider"><span>ADD A TIP</span></div>
             {tipDone ? (
               <div className="ok-text" style={{ marginBottom: 14 }}>
-                ✓ Tip sent — 100% goes to your driver
+                <CircleCheck size={14} /> Tip sent — 100% goes to your driver
               </div>
             ) : (
               <div style={{ marginBottom: 14 }}>
@@ -813,7 +844,7 @@ export default function Book(): React.ReactElement {
             )}
 
             <NeoButton variant={rated ? "primary" : "white"} fullWidth onClick={reset}>
-              Book Another Ride 🚀
+              <Rocket size={15} /> Book Another Ride
             </NeoButton>
           </NeoCard>
         )}

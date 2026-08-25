@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LatLon } from "@chalo/protocol";
+import { House, MapPin } from "lucide-react";
 
 interface PlaceResult {
   place_id: number;
@@ -256,10 +257,10 @@ export function LocationSearch({
                     background: "var(--primary-soft)",
                     borderRadius: "var(--radius-xs)",
                     border: "var(--brut-border-thin)",
-                    fontSize: 12,
                   }}
+                  aria-hidden
                 >
-                  {result.type === "house" ? "🏠" : "📍"}
+                  {result.type === "house" ? <House size={13} /> : <MapPin size={13} />}
                 </span>
                 <span style={{ minWidth: 0, flex: 1 }}>
                   <strong style={{ display: "block", fontSize: 13, color: "var(--ink)" }}>

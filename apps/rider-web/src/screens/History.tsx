@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatINR, paisa } from "@chalo/protocol";
+import { CarFront, Share2, TriangleAlert, X } from "lucide-react";
 import { listTrips, type TripListResponse, type TripView } from "../api";
 import { NeoCard, NeoButton, NeoBadge } from "../components/NeoComponents";
 
@@ -45,7 +46,7 @@ export default function History(): React.ReactElement {
   if (error) {
     return (
       <div style={{ maxWidth: 640, margin: "24px auto", padding: "0 16px" }}>
-        <div className="error-text">⚠️ {error}</div>
+        <div className="error-text" role="alert"><TriangleAlert size={14} /> {error}</div>
       </div>
     );
   }
@@ -71,7 +72,7 @@ export default function History(): React.ReactElement {
 
       {trips.length === 0 ? (
         <NeoCard style={{ padding: 32, textAlign: "center" }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>🚗</div>
+          <CarFront size={36} style={{ margin: "0 auto 8px", color: "var(--ink-muted)" }} />
           <h3 style={{ fontSize: 18, marginBottom: 6 }}>No rides recorded yet</h3>
           <p style={{ color: "var(--ink-muted)", fontSize: 13 }}>
             Completed and cancelled trips will appear here with full invoice breakdowns.
@@ -131,7 +132,7 @@ export default function History(): React.ReactElement {
                 aria-label="Close invoice"
                 style={{ width: 28, height: 28, padding: 0 }}
               >
-                ✕
+                <X size={14} />
               </button>
             </div>
 
@@ -193,7 +194,7 @@ export default function History(): React.ReactElement {
 
             <div className="row" style={{ gap: 10, marginTop: 18 }}>
               <NeoButton variant="primary" fullWidth onClick={() => void shareReceipt(selected)}>
-                Share Receipt 📄
+                <Share2 size={15} /> Share Receipt
               </NeoButton>
               <NeoButton variant="white" onClick={() => setSelected(null)}>
                 Close

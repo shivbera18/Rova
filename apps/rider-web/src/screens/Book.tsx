@@ -296,6 +296,16 @@ export default function Book(): React.ReactElement {
     reset();
   }
 
+  async function handleRegenerateOtp(): Promise<void> {
+    if (phase.k !== "trip") return;
+    try {
+      const { otp } = await regenerateTripOtp(phase.trip.id);
+      setPhase((p) => (p.k === "trip" ? { ...p, trip: { ...p.trip, otp } } : p));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate a new code");
+    }
+  }
+
   function reset(): void {
     stopPoll();
     setPickup(null);
@@ -554,6 +564,17 @@ export default function Book(): React.ReactElement {
                   {phase.trip.otp}
                 </div>
               </div>
+            )}
+
+            {["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(phase.trip.state) && (
+              <button
+                type="button"
+                className="use-location-btn"
+                style={{ marginTop: phase.trip.otp ? 0 : 12 }}
+                onClick={() => void handleRegenerateOtp()}
+              >
+                ⟳ Show new start code
+              </button>
             )}
 
             <div className="fare-box">

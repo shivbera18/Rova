@@ -125,6 +125,15 @@ export default function Book(): React.ReactElement {
       .catch(() => undefined);
   }, []);
 
+  async function handleTopUp(): Promise<void> {
+    try {
+      const w = await topUpWallet(50_000);
+      setWalletBalance(w.balancePaise);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Top-up failed");
+    }
+  }
+
   const [counterCount, setCounterCount] = useState(0);
   const [counterRound, setCounterRound] = useState(1);
   const [counterExpiresAt, setCounterExpiresAt] = useState<string | null>(null);
@@ -454,7 +463,7 @@ export default function Book(): React.ReactElement {
             )}
 
             <div className="booking-options">
-              <div>
+              <div style={{ width: "100%" }}>
                 <span className="option-label">PAYMENT METHOD</span>
                 <div className="payment-group">
                   {PAY_METHODS.map((pm) => (
@@ -467,6 +476,21 @@ export default function Book(): React.ReactElement {
                     </button>
                   ))}
                 </div>
+                {payMethod === "WALLET" && (
+                  <div className="row" style={{ justifyContent: "space-between", marginTop: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-muted)" }}>
+                      Balance: {walletBalance !== null ? formatINR(paisa(walletBalance)) : "…"}
+                    </span>
+                    <button
+                      type="button"
+                      className="use-location-btn"
+                      style={{ padding: "4px 12px", width: "auto" }}
+                      onClick={() => void handleTopUp()}
+                    >
+                      + Add ₹500 (dev)
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

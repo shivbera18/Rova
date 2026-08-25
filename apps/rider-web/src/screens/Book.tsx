@@ -284,6 +284,18 @@ export default function Book(): React.ReactElement {
     await loadQuotesForRoute(route.pickup, route.drop);
   }
 
+  async function confirmCancelTrip(): Promise<void> {
+    if (phase.k !== "trip") return;
+    try {
+      await cancelMatchedTrip(phase.trip.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not cancel the trip");
+    } finally {
+      setShowCancelConfirm(false);
+    }
+    reset();
+  }
+
   function reset(): void {
     stopPoll();
     setPickup(null);
@@ -558,6 +570,34 @@ export default function Book(): React.ReactElement {
                 <strong>{formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}</strong>
               </div>
             </div>
+
+            {["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(phase.trip.state) && (
+              showCancelConfirm ? (
+                <div style={{ marginTop: 14 }}>
+                  <p style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>
+                    Cancel this ride? Your driver is already on the way.
+                  </p>
+                  <div className="row" style={{ gap: 10 }}>
+                    <NeoButton variant="red" fullWidth onClick={() => void confirmCancelTrip()}>
+                      Yes, cancel
+                    </NeoButton>
+                    <NeoButton variant="white" fullWidth onClick={() => setShowCancelConfirm(false)}>
+                      Keep ride
+                    </NeoButton>
+                  </div>
+                </div>
+              ) : (
+                <NeoButton
+                  variant="white"
+                  size="sm"
+                  fullWidth
+                  style={{ marginTop: 14 }}
+                  onClick={() => setShowCancelConfirm(true)}
+                >
+                  Cancel Ride
+                </NeoButton>
+              )
+            )}
           </NeoCard>
         )}
 

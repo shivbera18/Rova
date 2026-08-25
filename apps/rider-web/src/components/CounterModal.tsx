@@ -14,8 +14,8 @@ export interface DriverCounter {
 
 export default function CounterModal({
   counter,
-  vehicleClass = "BIKE",
-  platformFeePaise = 1000,
+  vehicleClass,
+  platformFeePaise,
   minimumDriverPaise = 0,
   onClose,
   onResolved = () => {},
@@ -24,7 +24,6 @@ export default function CounterModal({
   onDecline,
 }: {
   counter: DriverCounter;
-  countdownSeconds?: number | null;
   vehicleClass?: string;
   platformFeePaise?: number;
   minimumDriverPaise?: number;
@@ -36,7 +35,7 @@ export default function CounterModal({
 }): React.ReactElement {
   const secs = useCountdown(counter.expiresAt);
   const [finalRupees, setFinalRupees] = useState((counter.paise / 100).toFixed(0));
-  const [platformRupees, setPlatformRupees] = useState((platformFeePaise / 100).toFixed(2));
+  const [platformRupees, setPlatformRupees] = useState(((platformFeePaise ?? 0) / 100).toFixed(2));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,7 +96,7 @@ export default function CounterModal({
         </div>
 
         <h3 style={{ fontSize: 20, marginBottom: 4 }}>
-          Driver Counter — {vehicleLabel(vehicleClass)}
+          Driver Counter{vehicleClass ? ` — ${vehicleLabel(vehicleClass)}` : ""}
         </h3>
         <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 16 }}>
           Round {counter.round} of 3 · Negotiate take-home pay
@@ -110,9 +109,11 @@ export default function CounterModal({
           <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, color: "var(--ink)" }}>
             {formatINR(paisa(counter.paise))}
           </div>
-          <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
-            Net Total with Platform: {formatINR(paisa(counter.paise + platformFeePaise))}
-          </div>
+          {(platformFeePaise ?? 0) > 0 && (
+            <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
+              Net Total with Platform: {formatINR(paisa(counter.paise + platformFeePaise!))}
+            </div>
+          )}
         </NeoCard>
 
         {error && (

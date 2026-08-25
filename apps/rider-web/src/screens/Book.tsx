@@ -5,7 +5,7 @@ import MapView from "../components/MapView";
 import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet";
 import { LocationSearch, type SelectedPlace } from "../components/LocationSearch";
 import CounterModal, { type DriverCounter } from "../components/CounterModal";
-import { useCountdown, useRiderSocket } from "../ws";
+import { useRiderSocket } from "../ws";
 import { NeoCard, NeoButton, NeoBadge, NeoInput } from "../components/NeoComponents";
 import {
   addTripTip,
@@ -134,11 +134,6 @@ export default function Book(): React.ReactElement {
     }
   }
 
-  const [counterCount, setCounterCount] = useState(0);
-  const [counterRound, setCounterRound] = useState(1);
-  const [counterExpiresAt, setCounterExpiresAt] = useState<string | null>(null);
-  const countdownSeconds = useCountdown(counterExpiresAt);
-
   const handleWsMessage = useCallback((msg: RiderWsMessage) => {
     if (msg.t === "request.updated") {
       setPhase((prev) => {
@@ -146,9 +141,6 @@ export default function Book(): React.ReactElement {
         return { ...prev, session: msg.session as unknown as RequestSessionView };
       });
     } else if (msg.t === "negotiation.counter") {
-      setCounterCount((c) => c + 1);
-      setCounterRound(msg.round);
-      setCounterExpiresAt(msg.expiresAt);
       setActiveDriverCounter({
         negotiationId: msg.negotiationId,
         counterPaise: msg.paise,
@@ -175,6 +167,12 @@ export default function Book(): React.ReactElement {
   }, []);
 
   const { connected: wsConnected } = useRiderSocket(handleWsMessage);
+
+  // Real class/fee for the counter dialog; never fall back to fabricated values.
+  const liveNegotiation = phase.k === "matching" ? phase : null;
+  const liveVehicleClass = liveNegotiation?.quote?.vehicleClass;
+  const livePlatformPaise =
+    liveNegotiation?.session.platformFeePaise ?? liveNegotiation?.quote?.platformFeePaise;
 
   const pollRef = useRef<number | null>(null);
   const stopPoll = useCallback(() => {
@@ -765,7 +763,8 @@ export default function Book(): React.ReactElement {
       {showCounterModal && activeDriverCounter && (
         <CounterModal
           counter={activeDriverCounter}
-          countdownSeconds={countdownSeconds}
+          vehicleClass={liveVehicleClass ?? ""}
+          platformFeePaise={livePlatformPaise}
           onAccept={() => setShowCounterModal(false)}
           onFinalOffer={() => setShowCounterModal(false)}
           onDecline={() => setShowCounterModal(false)}

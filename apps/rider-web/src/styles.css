@@ -475,10 +475,6 @@ h4 {
   height: 100%;
 }
 
-.leaflet-tile {
-  filter: saturate(0.9) contrast(1.02);
-}
-
 /* ============ Shell & Rider Workspace ============ */
 .shell {
   display: flex;

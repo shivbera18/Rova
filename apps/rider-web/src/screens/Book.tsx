@@ -5,7 +5,7 @@ import MapView from "../components/MapView";
 import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet";
 import { LocationSearch, type SelectedPlace } from "../components/LocationSearch";
 import CounterModal, { type DriverCounter } from "../components/CounterModal";
-import { useRiderSocket } from "../ws";
+import { useCountdown, useRiderSocket } from "../ws";
 import { NeoCard, NeoButton, NeoBadge, NeoInput } from "../components/NeoComponents";
 import {
   addTripTip,
@@ -173,6 +173,17 @@ export default function Book(): React.ReactElement {
   const liveVehicleClass = liveNegotiation?.quote?.vehicleClass;
   const livePlatformPaise =
     liveNegotiation?.session.platformFeePaise ?? liveNegotiation?.quote?.platformFeePaise;
+
+  // Matching lifecycle: countdown + expiry detection drive the radar card.
+  const matchSession = phase.k === "matching" ? phase.session : null;
+  const matchSecs = useCountdown(matchSession?.expiresAt);
+  const matchExpired =
+    !!matchSession && (matchSession.state === "EXPIRED" || (matchSecs ?? 1) <= 0);
+
+  async function searchAgain(): Promise<void> {
+    if (!pickup || !drop || loadingQuotes) return;
+    await loadQuotesForRoute(pickup, drop);
+  }
 
   const pollRef = useRef<number | null>(null);
   const stopPoll = useCallback(() => {
@@ -551,15 +562,19 @@ export default function Book(): React.ReactElement {
         )}
 
         {/* Phase 4: Matching Status Card */}
-        {phase.k === "matching" && (
+        {phase.k === "matching" && !matchExpired && (
           <NeoCard elevation="md" style={{ padding: 22 }}>
             <div className="spread" style={{ marginBottom: 12 }}>
               <span className="eyebrow">RADAR ACTIVE</span>
-              <NeoBadge variant="green">SEARCHING DRIVERS</NeoBadge>
+              <NeoBadge variant={matchSecs !== null && matchSecs <= 10 ? "red" : "green"}>
+                {matchSecs !== null ? `⏱ ${matchSecs}s` : "SEARCHING"}
+              </NeoBadge>
             </div>
             <h3 style={{ fontSize: 20, marginBottom: 6 }}>Connecting With Drivers...</h3>
             <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
               Broadcasting your offer to nearby verified drivers.
+              {phase.session.mode === "NEGOTIATED" &&
+                ` Round ${phase.session.round} of ${phase.session.maxRounds}.`}
             </p>
 
             <div className="progress-track" style={{ marginBottom: 16 }}>
@@ -578,6 +593,29 @@ export default function Book(): React.ReactElement {
             >
               Cancel Request
             </NeoButton>
+          </NeoCard>
+        )}
+
+        {/* Phase 4b: Matching Expired — offer recovery instead of a dead end */}
+        {phase.k === "matching" && matchExpired && (
+          <NeoCard elevation="md" style={{ padding: 22 }}>
+            <div className="spread" style={{ marginBottom: 12 }}>
+              <span className="eyebrow">NO TAKERS YET</span>
+              <NeoBadge variant="red">EXPIRED</NeoBadge>
+            </div>
+            <h3 style={{ fontSize: 20, marginBottom: 6 }}>No driver accepted your offer</h3>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
+              Try a higher driver amount or check nearby fares again — prices shift with demand.
+            </p>
+
+            <div className="col" style={{ gap: 10 }}>
+              <NeoButton variant="primary" fullWidth disabled={loadingQuotes} onClick={() => void searchAgain()}>
+                {loadingQuotes ? "Checking fares..." : "Search Again"}
+              </NeoButton>
+              <NeoButton variant="white" fullWidth onClick={reset}>
+                Change Route
+              </NeoButton>
+            </div>
           </NeoCard>
         )}
 

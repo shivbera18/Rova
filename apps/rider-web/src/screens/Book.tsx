@@ -115,6 +115,7 @@ export default function Book(): React.ReactElement {
   const [ratingVal, setRatingVal] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
   const [tipPaise, setTipPaise] = useState(0);
+  const [tipDone, setTipDone] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
@@ -150,6 +151,7 @@ export default function Book(): React.ReactElement {
       setShowCounterModal(false);
       setActiveDriverCounter(null);
       setTipPaise(0);
+      setTipDone(false);
       setRated(false);
       setPhase({ k: "trip", trip: msg.trip });
     } else if (msg.t === "trip.location") {
@@ -318,6 +320,20 @@ export default function Book(): React.ReactElement {
         return;
       }
       setError(err instanceof Error ? err.message : "Could not submit your rating");
+    }
+  }
+
+  async function submitTip(): Promise<void> {
+    if (phase.k !== "done" || tipPaise <= 0) return;
+    try {
+      await addTripTip(phase.trip.id, tipPaise);
+      setTipDone(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "TIP_ALREADY_SET") {
+        setTipDone(true);
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Could not add your tip");
     }
   }
 
@@ -680,6 +696,37 @@ export default function Book(): React.ReactElement {
                 />
                 <NeoButton variant="primary" fullWidth onClick={() => void submitRating()}>
                   Submit {ratingVal}-star rating
+                </NeoButton>
+              </div>
+            )}
+
+            <div className="booking-divider"><span>ADD A TIP</span></div>
+            {tipDone ? (
+              <div className="ok-text" style={{ marginBottom: 14 }}>
+                ✓ Tip sent — 100% goes to your driver
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                <div className="row" style={{ gap: 8, justifyContent: "center", marginBottom: 10 }}>
+                  {[1000, 2000, 5000].map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`payment-pill ${tipPaise === p ? "selected" : ""}`}
+                      aria-pressed={tipPaise === p}
+                      onClick={() => setTipPaise((cur) => (cur === p ? 0 : p))}
+                    >
+                      +₹{p / 100}
+                    </button>
+                  ))}
+                </div>
+                <NeoButton
+                  variant="accent"
+                  fullWidth
+                  disabled={tipPaise === 0}
+                  onClick={() => void submitTip()}
+                >
+                  {tipPaise === 0 ? "Pick a tip amount" : `Send ${formatINR(paisa(tipPaise))} tip`}
                 </NeoButton>
               </div>
             )}

@@ -734,6 +734,35 @@ h4 {
   white-space: nowrap;
 }
 
+.star-row {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+
+.star-btn {
+  background: transparent;
+  border: var(--brut-border-thin);
+  border-radius: var(--radius-sm);
+  width: 42px;
+  height: 42px;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.08s ease;
+}
+
+.star-btn.on {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.star-btn:hover {
+  transform: translate(-1px, -1px);
+}
+
 .fare-box {
   border: var(--brut-border-thin);
   border-radius: var(--radius-sm);

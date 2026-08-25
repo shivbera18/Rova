@@ -6,9 +6,10 @@ import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet"
 import { LocationSearch, type SelectedPlace } from "../components/LocationSearch";
 import CounterModal, { type DriverCounter } from "../components/CounterModal";
 import { useCountdown, useRiderSocket } from "../ws";
-import { NeoCard, NeoButton, NeoBadge } from "../components/NeoComponents";
+import { NeoCard, NeoButton, NeoBadge, NeoInput } from "../components/NeoComponents";
 import {
   addTripTip,
+  ApiError,
   cancelMatchedTrip,
   cancelRequest,
   getTrip,
@@ -303,6 +304,20 @@ export default function Book(): React.ReactElement {
       setPhase((p) => (p.k === "trip" ? { ...p, trip: { ...p.trip, otp } } : p));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate a new code");
+    }
+  }
+
+  async function submitRating(): Promise<void> {
+    if (phase.k !== "done") return;
+    try {
+      await rateTrip(phase.trip.id, { stars: ratingVal, comment: ratingComment.trim() || undefined });
+      setRated(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "ALREADY_RATED") {
+        setRated(true);
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Could not submit your rating");
     }
   }
 
@@ -634,7 +649,42 @@ export default function Book(): React.ReactElement {
               Total paid: {formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}
             </p>
 
-            <NeoButton variant="primary" fullWidth onClick={reset}>
+            <div className="booking-divider"><span>RATE YOUR DRIVER</span></div>
+            {rated ? (
+              <div className="ok-text" style={{ marginBottom: 14 }}>
+                ✓ Thanks — your rating helps other riders
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                <div className="star-row" role="radiogroup" aria-label="Driver rating">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      role="radio"
+                      aria-checked={ratingVal === n}
+                      aria-label={`${n} star${n > 1 ? "s" : ""}`}
+                      className={`star-btn ${n <= ratingVal ? "on" : ""}`}
+                      onClick={() => setRatingVal(n)}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+                <NeoInput
+                  label="Add a note (optional)"
+                  placeholder="How was the ride?"
+                  value={ratingComment}
+                  maxLength={280}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                />
+                <NeoButton variant="primary" fullWidth onClick={() => void submitRating()}>
+                  Submit {ratingVal}-star rating
+                </NeoButton>
+              </div>
+            )}
+
+            <NeoButton variant={rated ? "primary" : "white"} fullWidth onClick={reset}>
               Book Another Ride 🚀
             </NeoButton>
           </NeoCard>

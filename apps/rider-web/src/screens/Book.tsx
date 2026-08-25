@@ -511,9 +511,27 @@ export default function Book(): React.ReactElement {
           <NeoCard elevation="md" style={{ padding: 22 }}>
             <div className="spread" style={{ marginBottom: 12 }}>
               <NeoBadge variant="primary">{phase.trip.state}</NeoBadge>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)" }}>{phase.trip.vehicleClass}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)" }}>{vehicleLabel(phase.trip.vehicleClass)}</span>
             </div>
-            <h3 style={{ fontSize: 20, marginBottom: 8 }}>{stateLabel(phase.trip.state)}</h3>
+
+            <div className="driver-card">
+              <div className="driver-avatar" aria-hidden>
+                {(phase.trip.driverName || "D").slice(0, 1).toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14.5 }}>
+                  {phase.trip.driverName || "Driver details on arrival"}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-muted)" }}>
+                  ★ {phase.trip.driverRating.toFixed(1)} · pays via {phase.trip.paymentMethod ?? "UPI"}
+                </div>
+              </div>
+              {phase.trip.driverPlate && (
+                <span className="plate-chip">{phase.trip.driverPlate}</span>
+              )}
+            </div>
+
+            <h3 style={{ fontSize: 20, margin: "12px 0 8px" }}>{stateLabel(phase.trip.state)}</h3>
 
             {phase.trip.otp && (
               <div className="otp-display">

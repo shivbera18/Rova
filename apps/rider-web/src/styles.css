@@ -697,6 +697,43 @@ h4 {
   margin: 12px 0;
 }
 
+.driver-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: var(--brut-border-thin);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.driver-avatar {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  background: var(--primary-soft);
+  border: var(--brut-border-thin);
+  border-radius: var(--radius-full);
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 17px;
+  color: var(--primary);
+}
+
+.plate-chip {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  border: var(--brut-border-thin);
+  border-radius: var(--radius-xs);
+  background: var(--paper-subtle);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
 .fare-box {
   border: var(--brut-border-thin);
   border-radius: var(--radius-sm);

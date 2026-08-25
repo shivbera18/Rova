@@ -151,6 +151,12 @@ export default function Book(): React.ReactElement {
   const [tipDone, setTipDone] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [sheetCollapsed, setSheetCollapsed] = useState(false);
+
+  // New booking stage always deserves the rider's attention: raise the sheet.
+  useEffect(() => {
+    setSheetCollapsed(false);
+  }, [phase.k]);
 
   useEffect(() => {
     void getWallet()
@@ -416,7 +422,30 @@ export default function Book(): React.ReactElement {
         />
       </div>
 
-      <div className="side-panel">
+      <div className={`side-panel${sheetCollapsed ? " collapsed" : ""}`}>
+        <button
+          type="button"
+          className="sheet-handle"
+          aria-label={sheetCollapsed ? "Expand trip panel" : "Collapse trip panel"}
+          aria-expanded={!sheetCollapsed}
+          onClick={() => setSheetCollapsed((v) => !v)}
+          onPointerDown={(e) => {
+            const startY = e.clientY;
+            let moved = 0;
+            const onMove = (ev: PointerEvent): void => { moved = ev.clientY - startY; };
+            const onUp = (): void => {
+              window.removeEventListener("pointermove", onMove);
+              window.removeEventListener("pointerup", onUp);
+              if (Math.abs(moved) > 32) setSheetCollapsed(moved > 0);
+            };
+            window.addEventListener("pointermove", onMove);
+            window.addEventListener("pointerup", onUp);
+          }}
+        >
+          <span className="sheet-grip" />
+        </button>
+
+        <div className="sheet-body">
         {error && (
           <div className="error-text" style={{ marginBottom: 12 }} role="alert">
             <TriangleAlert size={14} /> {error}
@@ -848,6 +877,7 @@ export default function Book(): React.ReactElement {
             </NeoButton>
           </NeoCard>
         )}
+        </div>
       </div>
 
       {showCounterModal && activeDriverCounter && (

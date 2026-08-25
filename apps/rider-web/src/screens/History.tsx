@@ -62,7 +62,7 @@ export default function History(): React.ReactElement {
   }
 
   return (
-    <div style={{ maxWidth: 680, height: "100%", margin: "0 auto", overflowY: "auto", padding: "24px 16px 80px" }}>
+    <div style={{ maxWidth: 680, height: "100%", margin: "0 auto", overflowY: "auto", padding: "72px 16px 90px" }}>
       <div style={{ marginBottom: 20 }}>
         <span className="eyebrow">YOUR JOURNEYS</span>
         <h2 style={{ fontSize: 26, fontWeight: 900, textTransform: "none", marginTop: 2 }}>

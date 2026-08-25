@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LatLon, RiderWsMessage } from "@chalo/protocol";
+import { distanceKm } from "@chalo/protocol";
 import { formatINR, paisa } from "@chalo/protocol";
 import MapView from "../components/MapView";
 import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet";
@@ -97,6 +98,18 @@ function stateLabel(s: string): string {
   }
 }
 
+const PRE_START_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"];
+
+/** Honest straight-line estimate at a typical city speed; null when unknowable. */
+function pickupEtaMin(trip: TripView, livePos: LatLon | null): number | null {
+  if (!PRE_START_STATES.includes(trip.state)) return null;
+  const pos = livePos ?? (trip.driverLat != null && trip.driverLng != null ? { lat: trip.driverLat, lng: trip.driverLng } : null);
+  if (!pos) return null;
+  const km = distanceKm(pos, trip.pickup);
+  if (!Number.isFinite(km) || km > 40) return null;
+  return Math.max(1, Math.round((km / 22) * 60));
+}
+
 export default function Book(): React.ReactElement {
   const [phase, setPhase] = useState<Phase>({ k: "pick" });
   const [pickup, setPickup] = useState<LatLon | null>(null);
@@ -179,6 +192,8 @@ export default function Book(): React.ReactElement {
   const matchSecs = useCountdown(matchSession?.expiresAt);
   const matchExpired =
     !!matchSession && (matchSession.state === "EXPIRED" || (matchSecs ?? 1) <= 0);
+
+  const etaMin = phase.k === "trip" ? pickupEtaMin(phase.trip, liveDriverPos) : null;
 
   async function searchAgain(): Promise<void> {
     if (!pickup || !drop || loadingQuotes) return;
@@ -646,6 +661,12 @@ export default function Book(): React.ReactElement {
 
             <h3 style={{ fontSize: 20, margin: "12px 0 8px" }}>{stateLabel(phase.trip.state)}</h3>
 
+            {etaMin !== null && (
+              <p style={{ fontSize: 13, fontWeight: 700, color: "var(--primary)", marginBottom: 8 }}>
+                About {etaMin} min from pickup
+              </p>
+            )}
+
             {phase.trip.otp && (
               <div className="otp-display">
                 <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
@@ -657,7 +678,7 @@ export default function Book(): React.ReactElement {
               </div>
             )}
 
-            {["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(phase.trip.state) && (
+            {PRE_START_STATES.includes(phase.trip.state) && (
               <button
                 type="button"
                 className="use-location-btn"
@@ -683,7 +704,7 @@ export default function Book(): React.ReactElement {
               </div>
             </div>
 
-            {["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(phase.trip.state) && (
+            {PRE_START_STATES.includes(phase.trip.state) && (
               showCancelConfirm ? (
                 <div style={{ marginTop: 14 }}>
                   <p style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>

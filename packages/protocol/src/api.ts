@@ -108,6 +108,10 @@ export interface TripView {
   fareBreakdown: FareBreakdown;
   pickupLabel?: string;
   dropLabel?: string;
+  /** rider display name (driver console surfaces it post-ride for rating) */
+  riderName?: string;
+  /** stars the caller already gave on this trip, when they rated */
+  myRatingStars?: number;
   driverName?: string;
   driverPlate?: string;
   driverRating?: number;

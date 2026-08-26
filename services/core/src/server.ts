@@ -939,7 +939,15 @@ export async function startServer(listenPort = PORT): Promise<{
     if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {
       fail(403, "FORBIDDEN", "not your trip");
     }
-    return tripView(trip);
+    const mine = await sql.query<{ stars: number }>(
+      "SELECT stars FROM ratings WHERE trip_id=$1 AND rater_id=$2",
+      [id, sess.userId],
+    );
+    return {
+      ...tripView(trip),
+      riderName: trip.rider_name ?? undefined,
+      ...(mine.rows[0] ? { myRatingStars: mine.rows[0].stars } : {}),
+    };
   });
 
   app.post("/v1/trips/:id/regenerate-otp", async (req) => {

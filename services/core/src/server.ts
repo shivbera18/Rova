@@ -924,6 +924,18 @@ export async function startServer(listenPort = PORT): Promise<{
     return { tripId: trip.id, otp };
   }
 
+  /** Relay a validated driver position to the rider of their active trip (protocol `trip.location`). */
+  async function relayPositionToRider(driverId: string, lat: number, lng: number): Promise<void> {
+    const active = await sql.query<{ rider_id: string }>(
+      `SELECT rider_id FROM trips
+       WHERE driver_id=$1 AND state IN ('DRIVER_ASSIGNED','ARRIVING','ARRIVED','ONGOING')
+       LIMIT 1`,
+      [driverId],
+    );
+    const row = active.rows[0];
+    if (row) pushRider(row.rider_id, { t: "trip.location", lat, lng });
+  }
+
   // ---- websockets -------------------------------------------------------------------
 
   app.get("/ws/rider", { websocket: true }, (socket, req) => {
@@ -986,6 +998,7 @@ export async function startServer(listenPort = PORT): Promise<{
             validateDriverGps(sess.userId, { lat: msg.lat, lng: msg.lng });
             setDriverPos(sess.userId, { lat: msg.lat, lng: msg.lng });
             void sql.query("UPDATE driver_profiles SET last_lat=$2,last_lng=$3 WHERE user_id=$1", [sess.userId, msg.lat, msg.lng]);
+            void relayPositionToRider(sess.userId, msg.lat, msg.lng);
           } catch (err) { logger.warn("FRAUD", `Rejected driver GPS update user=${sess.userId.slice(0, 8)}`, err); }
         }
       });

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Comprehensive verification suite covering all core requirements:
  * 1. Money & Fee Model (clamping, zero-offer, platform fee on rider side)
  * 2. Quote Token Cryptography (HMAC signature, expiry, tampering detection)
@@ -6,17 +6,21 @@
  * 4. Dispatch & Matching (haversine ring expansion, vehicle class matching, atomic race claim)
  * 5. Trip Lifecycle & Security (OTP hashing, attempt locks, state progression)
  * 6. Double-Entry Accounting Ledger (balance invariant, cash vs digital settlement, tip routing)
- * 7. End-to-End Multi-Party Scenarios:
+* 7. End-to-End Multi-Party Scenarios:
  *    - Scenario A: List-price instant dispatch & driver accept
- *    - Scenario B: Negotiated booking (zero offer â‚¹0) with driver accept
- *    - Scenario C: Negotiated booking with driver counter â†’ rider accept
- *    - Scenario D: Negotiated booking with driver counter â†’ rider final offer â†’ driver accept
- *    - Scenario E: Driver counter â†’ rider decline
+ *    - Scenario B: Negotiated booking (zero offer Rs0) with driver accept
+ *    - Scenario C: Negotiated booking with driver counter -> rider accept
+ *    - Scenario D: Negotiated booking with driver counter -> rider final offer -> driver accept
+ *    - Scenario E: Driver counter -> rider decline
  *    - Scenario F: Rider cancel pre-agreement
  *    - Scenario G: Driver cancel post-assignment
  *    - Scenario H: OTP start failure (invalid code rejection + correct code start)
  *    - Scenario I: Cash ride settlement (cash receivable + digital fee)
  *    - Scenario J: Ratings & duplicate rating rejection
+ *    - Scenario K: Immutable single-vehicle driver registration
+ *    - Scenario L: Wallet top-up & booking guard
+ *    - Scenario M: Matched rider cancellation
+ *    - Scenario N: Favourite drivers + direct-to-driver dispatch
  */
 process.env.NO_AUTO_START = "1";
 import WebSocket from "ws";
@@ -662,7 +666,7 @@ async function runVerification(): Promise<void> {
   }
 
   // --- Scenario K: Favourite Drivers + Direct-to-Director Requests ---
-  console.log("\n  [Scenario M] Ride Again With Driver (direct dispatch)");
+  console.log("\n  [Scenario N] Ride Again With Driver (direct dispatch)");
   {
     const driverId = driverAuth.json.userId as string;
 

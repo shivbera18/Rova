@@ -689,6 +689,9 @@ export async function startServer(listenPort = PORT): Promise<{
     const { id } = req.params as { id: string };
     const { to } = req.body as { to?: "ARRIVING" | "ARRIVED" };
     if (to !== "ARRIVING" && to !== "ARRIVED") fail(400, "BAD_BODY", "to must be ARRIVING|ARRIVED");
+    const owned = await getTrip(sql, id);
+    if (!owned) fail(404, "NOT_FOUND", "no such trip");
+    if (owned.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
     try {
       const trip = await transitionTrip(sql, id, to);
       pushRider(trip.rider_id, { t: "trip.state", state: trip.state as never });
@@ -1046,6 +1049,9 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!stars || stars < 1 || stars > 5) fail(400, "BAD_STARS", "stars 1..5 required");
     const trip = await getTrip(sql, id);
     if (!trip || trip.state !== "COMPLETED") fail(409, "NOT_COMPLETED", "rate after completion");
+    if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {
+      fail(403, "FORBIDDEN", "not your trip");
+    }
     const rateeId = trip.rider_id === sess.userId ? trip.driver_id : trip.rider_id;
     try {
       await sql.query(
@@ -1098,6 +1104,9 @@ export async function startServer(listenPort = PORT): Promise<{
   app.post("/v1/trips/:id/cancel-driver", async (req) => {
     const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
+    const owned = await getTrip(sql, id);
+    if (!owned) fail(404, "NOT_FOUND", "no such trip");
+    if (owned.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
     try {
       const trip = await transitionTrip(sql, id, "CANCELLED_DRIVER");
       releaseClaim(trip.request_id);

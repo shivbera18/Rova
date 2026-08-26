@@ -236,7 +236,14 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!devAuthEnabled()) {
       // Fail closed: until a real SMS provider is wired (MSG91 slot, plan §5),
       // no OTP login exists outside explicitly enabled dev/test environments.
-      fail(503, "OTP_UNAVAILABLE", "OTP delivery is not configured for this environment");
+      if (process.env.NODE_ENV === "production") {
+        fail(503, "OTP_UNAVAILABLE", "OTP delivery is not configured for this environment");
+      }
+      fail(
+        503,
+        "OTP_UNAVAILABLE",
+        "Dev OTP is disabled here — add ENABLE_DEV_ENDPOINTS=1 to services/core/.env and restart the server",
+      );
     }
     if (otp !== DEV_OTP) fail(401, "BAD_OTP", "wrong code");
     const user = await upsertUser(sql, phone!, role!, fullName ?? "Chalo user");
@@ -1595,6 +1602,12 @@ export async function startServer(listenPort = PORT): Promise<{
 
   await app.listen({ port: listenPort, host: "127.0.0.1" });
   console.log(`[core] listening on :${listenPort} (storage: ${storage.kind})`);
+  if (process.env.NODE_ENV !== "production" && !devAuthEnabled()) {
+    console.warn(
+      "[core] Dev conveniences are OFF — OTP logins will fail with OTP_UNAVAILABLE.\n" +
+        "       Fix: add ENABLE_DEV_ENDPOINTS=1 to services/core/.env and restart.",
+    );
+  }
   return {
     app,
     storage,

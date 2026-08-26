@@ -5,7 +5,7 @@
  *   /ws/rider /ws/driver             realtime channels (token in query string)
  * Storage: PG when DATABASE_URL set, else embedded PGlite auto-migrated on boot.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
@@ -915,6 +915,74 @@ export async function startServer(listenPort = PORT): Promise<{
       if (err instanceof TripError) fail(409, err.code, err.message);
       throw err;
     }
+  });
+
+  app.post("/v1/trips/:id/share-link", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    const trip = await getTrip(sql, id);
+    if (!trip || trip.rider_id !== sess.userId) fail(404, "NOT_FOUND", "no such trip");
+    if (["CANCELLED_RIDER", "CANCELLED_DRIVER"].includes(trip.state)) {
+      fail(409, "NOT_SHAREABLE", "cancelled trips cannot be shared");
+    }
+    let token = trip.share_token ?? null;
+    if (!token) {
+      token = randomBytes(16).toString("base64url");
+      const upd = await sql.query<{ share_token: string }>(
+        "UPDATE trips SET share_token=$2 WHERE id=$1 AND share_token IS NULL RETURNING share_token",
+        [id, token],
+      );
+      token = upd.rows[0]?.share_token ?? token;
+    }
+    const origin = process.env.PUBLIC_ORIGIN ?? `${req.protocol}://${req.headers.host ?? "localhost:5173"}`;
+    return { url: `${origin}/share/${token}` };
+  });
+
+  // Public, unauthenticated: the whole point of a journey-share link.
+  app.get("/v1/share/:token", async (req) => {
+    const { token } = req.params as { token: string };
+    const r = (
+      await sql.query<{
+        state: string;
+        vehicle_class: string;
+        pickup_lat: number;
+        pickup_lng: number;
+        drop_lat: number;
+        drop_lng: number;
+        pickup_label: string | null;
+        drop_label: string | null;
+        started_at: Date | null;
+        ended_at: Date | null;
+        driver_id: string;
+        driver_name: string | null;
+        plate: string | null;
+      }>(
+        `SELECT t.state, t.vehicle_class, t.pickup_lat, t.pickup_lng, t.drop_lat, t.drop_lng,
+                r.pickup_label, r.drop_label, t.started_at, t.ended_at,
+                t.driver_id, u.full_name AS driver_name, d.plate
+         FROM trips t
+         JOIN ride_requests r ON r.id=t.request_id
+         JOIN users u ON u.id=t.driver_id
+         LEFT JOIN driver_profiles d ON d.user_id=t.driver_id
+         WHERE t.share_token=$1`,
+        [token],
+      )
+    ).rows[0];
+    if (!r) fail(404, "NOT_FOUND", "this journey link is not valid");
+    const pos = getLiveDriver(r.driver_id);
+    return {
+      state: r.state,
+      vehicleClass: r.vehicle_class,
+      driverFirstName: (r.driver_name ?? "").split(" ")[0] || null,
+      driverPlate: r.plate,
+      pickup: { lat: Math.round(r.pickup_lat * 1000) / 1000, lng: Math.round(r.pickup_lng * 1000) / 1000 },
+      drop: { lat: Math.round(r.drop_lat * 1000) / 1000, lng: Math.round(r.drop_lng * 1000) / 1000 },
+      pickupLabel: r.pickup_label,
+      dropLabel: r.drop_label,
+      startedAt: r.started_at ? new Date(r.started_at).toISOString() : undefined,
+      endedAt: r.ended_at ? new Date(r.ended_at).toISOString() : undefined,
+      driverLivePos: ["ONGOING", "ARRIVING"].includes(r.state) && pos ? { lat: pos.pos.lat, lng: pos.pos.lng } : undefined,
+    };
   });
 
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {

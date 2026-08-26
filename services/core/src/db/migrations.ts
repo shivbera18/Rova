@@ -145,6 +145,9 @@ export const MIGRATIONS = [
 
     ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS pickup_label text;
     ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS drop_label text;
+
+    -- live journey sharing: opaque per-trip token, minted on demand
+    ALTER TABLE trips ADD COLUMN IF NOT EXISTS share_token text UNIQUE;
     `,
   },
 ];

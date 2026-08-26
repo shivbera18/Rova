@@ -791,7 +791,18 @@ export async function startServer(listenPort = PORT): Promise<{
     const trip0 = await getTrip(sql, id);
     if (!trip0) fail(404, "NOT_FOUND", "no such trip");
     if (trip0.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
-    if (trip0.state === "COMPLETED") return { state: "COMPLETED", duplicate: true };
+    if (trip0.state === "COMPLETED") {
+      // Settlement may have failed after the state flip (e.g. wallet guard);
+      // settleTrip is idempotent by `settle:<tripId>` — retry it here so a
+      // completed trip is never left silently unsettled.
+      try {
+        const retry = await settleTrip(sql, id, 0);
+        return { state: "COMPLETED", txnId: retry.txnId, duplicate: true };
+      } catch (err) {
+        if (err instanceof TripError) fail(409, err.code, err.message);
+        throw err;
+      }
+    }
     try {
       await transitionTrip(sql, id, "COMPLETED");
       const settlement = await settleTrip(sql, id, 0);

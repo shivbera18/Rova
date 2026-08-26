@@ -1394,7 +1394,10 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = requireAuth(await session(req));
     const { id } = req.params as { id: string };
     const { stars, comment } = req.body as { stars?: number; comment?: string };
-    if (!stars || stars < 1 || stars > 5) fail(400, "BAD_STARS", "stars 1..5 required");
+    if (!Number.isInteger(stars) || stars! < 1 || stars! > 5) fail(400, "BAD_STARS", "integer stars 1..5 required");
+    if (comment != null && (typeof comment !== "string" || comment.length > 500)) {
+      fail(400, "COMMENT_TOO_LONG", "rating comment is limited to 500 characters");
+    }
     const trip = await getTrip(sql, id);
     if (!trip || trip.state !== "COMPLETED") fail(409, "NOT_COMPLETED", "rate after completion");
     if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {

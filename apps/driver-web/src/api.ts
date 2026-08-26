@@ -84,7 +84,6 @@ export const api = {
     call<{ state: string; txnId: string }>(`/v1/trips/${id}/complete`, "POST", { tipPaise }),
 
   rateTrip: (id: string, stars: number, comment?: string) =>
-
     call<{ ok: true }>(`/v1/trips/${id}/rate`, "POST", { stars, comment }),
 };
 /** Raw WebSocket to /ws/driver with auto-reconnect. */

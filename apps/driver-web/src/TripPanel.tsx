@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatINR, paisa, type TripView } from "@chalo/protocol";
 import { Flag, KeyRound, MapPin, Navigation, Rocket, Star, TriangleAlert } from "lucide-react";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { NeoCard, NeoButton, NeoBadge, NeoInput } from "./NeoComponents";
 
 const STATE_COPY: Record<string, string> = {
@@ -78,11 +78,15 @@ function RateRiderCard({ trip, onDone }: { trip: TripView; onDone: () => void })
             setErr(null);
             void api
               .rateTrip(trip.id, stars, comment.trim() || undefined)
-              .then(() => {
-                setRated(true);
-                trip.myRatingStars = stars;
+              .then(() => setRated(true))
+              .catch((e) => {
+                // rated elsewhere (other device) — treat as done, not an error
+                if (e instanceof ApiError && e.code === "ALREADY_RATED") {
+                  setRated(true);
+                  return;
+                }
+                setErr(e instanceof Error ? e.message : "Could not submit rating");
               })
-              .catch((e) => setErr(e instanceof Error ? e.message : "Could not submit rating"))
               .finally(() => setBusy(false));
           }}
         >

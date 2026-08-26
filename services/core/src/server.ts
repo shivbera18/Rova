@@ -265,6 +265,7 @@ export async function startServer(listenPort = PORT): Promise<{
     return { ticket, expiresIn: 60 };
   });
   app.post("/v1/quotes", async (req) => {
+    requireRider(await session(req));
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
     if (!body.pickup || !body.drop) fail(400, "BAD_BODY", "pickup and drop required");
     const classes = body.vehicleClasses ?? [...VEHICLE_CLASSES];

@@ -74,6 +74,13 @@ async function api(
   return { status: res.status, json: await res.json().catch(() => ({})) };
 }
 
+/** Mint a single-use WS ticket — the server no longer accepts raw JWTs in the URL. */
+async function wsTicket(token: string): Promise<string> {
+  const r = await api("/v1/ws/ticket", {}, token);
+  if (r.status !== 200 || !r.json?.ticket) throw new Error(`ws ticket mint failed: ${r.status} ${JSON.stringify(r.json)}`);
+  return r.json.ticket as string;
+}
+
 /** Single-socket message router: collects every frame, awaits specific matches. */
 class WsBus {
   private socket: WebSocket;
@@ -81,10 +88,10 @@ class WsBus {
   readonly log: any[] = [];
   private openPromise: Promise<void>;
 
-  constructor(url: string, token: string) {
+  constructor(url: string, ticket: string) {
     const { promise, resolve } = Promise.withResolvers<void>();
     this.openPromise = promise;
-    this.socket = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
+    this.socket = new WebSocket(`${url}?ticket=${encodeURIComponent(ticket)}`);
     const t = setTimeout(() => this.socket.emit("error", new Error("ws connect timeout")), 10000);
     this.socket.on("open", () => {
       clearTimeout(t);
@@ -220,8 +227,8 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
   }
 
   // ---- shared sockets ---------------------------------------------------------
-  const riderWs = new WsBus(`${BASE.replace("http", "ws")}/ws/rider`, riderToken);
-  const driverWs = new WsBus(`${BASE.replace("http", "ws")}/ws/driver`, driverToken);
+  const riderWs = new WsBus(`${BASE.replace("http", "ws")}/ws/rider`, await wsTicket(riderToken));
+  const driverWs = new WsBus(`${BASE.replace("http", "ws")}/ws/driver`, await wsTicket(driverToken));
   await riderWs.ready();
   await driverWs.ready();
   driverWs.send({ t: "pos.update", lat: PICKUP.lat, lng: PICKUP.lng });
@@ -261,7 +268,7 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
        ON CONFLICT (user_id) DO UPDATE SET kyc_status='APPROVED', vehicle_class='BIKE'`,
       [rivalUserId],
     );
-    const rivalWs = new WsBus(`${BASE.replace("http", "ws")}/ws/driver`, rivalTok);
+    const rivalWs = new WsBus(`${BASE.replace("http", "ws")}/ws/driver`, await wsTicket(rivalTok));
     await rivalWs.ready();
     rivalWs.send({ t: "pos.update", lat: PICKUP.lat, lng: PICKUP.lng });
     await new Promise((r) => setTimeout(r, 250));
@@ -396,10 +403,10 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
     const counterMsg = await counterWait;
     check("rider got negotiation.counter push with amount", counterMsg.paise === lowball + 2000);
 
-    const belowOffer = await api(`/v1/negotiations/${negId}/final`, { paise: 1 }, riderToken);
+    const belowOffer = await api(`/v1/negotiations/${negId}/final`, { paise: 1, platformFeePaise: bike.platformFeePaise }, riderToken);
     check("rider final below driver counter blocked (409)", belowOffer.status === 409);
 
-    const finalResp = await api(`/v1/negotiations/${negId}/final`, { paise: lowball + 1000 }, riderToken);
+    const finalResp = await api(`/v1/negotiations/${negId}/final`, { paise: lowball + 1000, platformFeePaise: bike.platformFeePaise }, riderToken);
     check("rider final-offer moves to round 2", finalResp.status === 200 && finalResp.json.round === 2);
 
     const updatedOffer = await driverWs.waitFor(
@@ -473,7 +480,7 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
     // FSM: opening offer (round 1) -> driver counter -> rider closing offer (round 2).
     // From COUNTERED_RIDER the driver can ONLY accept/expire/cancel — no second counter.
     await api(`/v1/negotiations/${negId}/counter`, { paise: bike.listPrice }, driverToken);
-    const fin = await api(`/v1/negotiations/${negId}/final`, { paise: 150 }, riderToken);
+    const fin = await api(`/v1/negotiations/${negId}/final`, { paise: 150, platformFeePaise: bike.platformFeePaise }, riderToken);
     check("counter + closing offer reach round 2", fin.status === 200 && fin.json.round === 2);
 
     const reCounter = await api(`/v1/negotiations/${negId}/counter`, { paise: bike.listPrice }, driverToken);
@@ -485,7 +492,7 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
 
     // white-box: push round to the cap and verify the guardrail trips
     await sql.query("UPDATE negotiations SET round=$2 WHERE id=$1", [negId, 3]);
-    const overCap = await api(`/v1/negotiations/${negId}/final`, { paise: 400 }, riderToken);
+    const overCap = await api(`/v1/negotiations/${negId}/final`, { paise: 400, platformFeePaise: bike.platformFeePaise }, riderToken);
     check(
       "final beyond maxRounds rejected NEGOTIATION_ROUND_EXCEEDED (409)",
       overCap.status === 409 && overCap.json.code === "NEGOTIATION_ROUND_EXCEEDED",

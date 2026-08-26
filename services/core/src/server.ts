@@ -230,6 +230,7 @@ export async function startServer(listenPort = PORT): Promise<{
       newPassword?: string;
     };
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
+    if (!/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
     enforceRateLimit(`otpv-ip:${req.ip}`, 20, 10 * 60_000);
     enforceRateLimit(`otpv-phone:${phone}`, 5, 10 * 60_000);
     if (!devAuthEnabled()) {
@@ -251,7 +252,7 @@ export async function startServer(listenPort = PORT): Promise<{
       role?: "RIDER" | "DRIVER";
       vehicleClass?: string;
     };
-    if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
+    if (!phone || !/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
     if (!password || typeof password !== "string" || password.length < 4) {
       fail(400, "WEAK_PASSWORD", "password must be at least 4 characters");
     }
@@ -352,7 +353,9 @@ export async function startServer(listenPort = PORT): Promise<{
       fail(400, "BAD_BODY", "quoteToken, vehicleClass, paymentMethod, pickup, drop required");
     }
     const clean = (s: string | undefined): string | null =>
-      typeof s === "string" ? s.trim().slice(0, 200) || null : null;
+      typeof s === "string"
+        ? s.replace(/[ -­]/g, "").trim().slice(0, 200) || null
+        : null;
     const negotiated = typeof body.offerPaise === "number";
     const platformContribution = negotiated ? (body.platformFeePaise ?? payload.pf) : payload.pf;
     if (negotiated && (!Number.isSafeInteger(body.offerPaise) || body.offerPaise! < 0)) {

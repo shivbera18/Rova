@@ -128,9 +128,12 @@ export async function createTripFromAgreement(
 
 export async function getTrip(sql: SqlRowClient, tripId: string): Promise<TripRow | null> {
   const r = await sql.query<TripRow>(
-    `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label, ru.full_name AS rider_name FROM trips t
+    `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label, ru.full_name AS rider_name,
+            o.expires_at AS otp_expires_at, o.attempts AS otp_attempts
+     FROM trips t
      JOIN ride_requests r ON r.id=t.request_id
      JOIN users ru ON ru.id = t.rider_id
+     LEFT JOIN otp_codes o ON o.trip_id = t.id
      WHERE t.id=$1`,
     [tripId],
   );

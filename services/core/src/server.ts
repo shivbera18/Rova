@@ -958,24 +958,16 @@ export async function startServer(listenPort = PORT): Promise<{
       [id, sess.userId],
     );
     // Pre-start trips surface the start-code window so driver/rider UIs can
-    // render the countdown and remaining attempts.
+    // render the countdown and remaining attempts (joined by getTrip).
     let otpWindow: Record<string, unknown> = {};
-    if (["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state)) {
-      const row = (
-        await sql.query<{ expires_at: Date; attempts: number }>(
-          "SELECT expires_at, attempts FROM otp_codes WHERE trip_id=$1",
-          [id],
-        )
-      ).rows[0];
-      if (row) {
-        const expiresAt = new Date(row.expires_at);
-        otpWindow = {
-          otpExpiresAt: expiresAt.toISOString(),
-          otpExpiresInMs: Math.max(0, expiresAt.getTime() - Date.now()),
-          otpAttemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - row.attempts),
-          otpAttemptsMax: OTP_MAX_ATTEMPTS,
-        };
-      }
+    if (["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state) && trip.otp_expires_at) {
+      const expiresAt = new Date(trip.otp_expires_at);
+      otpWindow = {
+        otpExpiresAt: expiresAt.toISOString(),
+        otpExpiresInMs: Math.max(0, expiresAt.getTime() - Date.now()),
+        otpAttemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - (trip.otp_attempts ?? 0)),
+        otpAttemptsMax: OTP_MAX_ATTEMPTS,
+      };
     }
     return {
       ...tripView(trip),

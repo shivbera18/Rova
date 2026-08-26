@@ -205,9 +205,13 @@ Follow this walkthrough across two browser tabs to test the full negotiated ride
 
 #### Phase E: Trip Lifecycle & OTP Verification (Tab 1 $\to$ Tab 2)
 1. In the Driver Tab, click **`I'm on my way (ARRIVING)`**.
-2. Click **`I have arrived (ARRIVED)`**.
-3. The driver console prompts: *"Ask rider for their 6-digit OTP"*.
-4. Enter the 6-digit OTP shown on the Rider's screen $\to$ click **Start ride**.
+2. Click **`I have arrived (ARRIVED)`**. This opens the start-code window:
+   **5 minutes, 3 attempts**, shown as a live countdown on the driver card.
+3. The driver console prompts: *"Passenger's 6-digit start code"*.
+4. Enter the 6-digit code shown on the Rider's screen $\to$ click **Start ride**.
+   - If the window closes (timeout) or 3 wrong codes are entered, entry is
+     disabled and the rider taps **`Show new start code`** — that resets both
+     the timer and the attempt budget.
 5. Both screens transition to **`On your ride` / `Ride in progress`**.
 6. In the Driver Tab, click **`Complete ride`**.
 

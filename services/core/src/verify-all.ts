@@ -546,6 +546,18 @@ async function runVerification(): Promise<void> {
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVING" }, driverToken);
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVED" }, driverToken);
 
+    // arrival opens a fresh 5-minute window with a clean attempt budget
+    const arrivedView = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    assert(
+      arrivedView.json.otpExpiresInMs > 4 * 60_000 && arrivedView.json.otpExpiresInMs <= 5 * 60_000,
+      "Arrival re-stamps a fresh five-minute start-code window",
+      `${arrivedView.json.otpExpiresInMs}ms`,
+    );
+    assert(
+      arrivedView.json.otpAttemptsLeft === 3 && arrivedView.json.otpAttemptsMax === 3,
+      "Arrival resets the attempt budget",
+    );
+
     // start-code window: 3-strike lock then expiry, regeneration recovers
     for (let i = 0; i < 3; i++) {
       const bad = await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
@@ -556,13 +568,15 @@ async function runVerification(): Promise<void> {
     const attemptsView = await api(`/v1/trips/${tripId}`, undefined, driverToken);
     assert(attemptsView.json.otpAttemptsLeft === 0 && typeof attemptsView.json.otpExpiresAt === "string", "Trip view exposes exhausted attempts and the code window");
 
-    // expiry beats a matching hash — a stale-but-correct code must fail closed
-    await serverHandle?.storage.sql.query(
-      "UPDATE otp_codes SET expires_at = now() - interval '1 minute' WHERE trip_id=$1",
-      [tripId],
-    );
+    // regeneration clears the lock and hands back the fresh window inline
     const regenRes = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);
     assert(regenRes.status === 200 && !!regenRes.json.otp, "Rider retrieved start OTP via secure regenerate-otp endpoint");
+    assert(
+      regenRes.json.otpAttemptsLeft === 3 && regenRes.json.otpExpiresInMs > 4 * 60_000,
+      "Regeneration returns a reset budget and a fresh window",
+    );
+
+    // expiry beats a matching hash — a stale-but-correct code must fail closed
     await serverHandle?.storage.sql.query(
       "UPDATE otp_codes SET expires_at = now() - interval '1 minute' WHERE trip_id=$1",
       [tripId],
@@ -570,7 +584,7 @@ async function runVerification(): Promise<void> {
     const expiredStart = await api(`/v1/trips/${tripId}/start`, { otp: regenRes.json.otp }, riderToken);
     assert(expiredStart.status === 409 && expiredStart.json.code === "OTP_EXPIRED", "Expired start code rejected even when the code matches");
     const expiredView = await api(`/v1/trips/${tripId}`, undefined, riderToken);
-    assert(!!expiredView.json.otpExpiresAt, "Trip view exposes the start-code window to the rider");
+    assert(expiredView.json.otpExpiresInMs === 0, "Trip view reports a closed window as zero remaining");
 
     // regeneration is the recovery path after both lock and expiry
     const fresh = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);

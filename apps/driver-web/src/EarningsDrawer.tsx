@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatINR, paisa, type TripView } from "@chalo/protocol";
+import { Star, X } from "lucide-react";
 import { api } from "./api";
 import { NeoCard, NeoButton, NeoBadge } from "./NeoComponents";
 
@@ -47,7 +48,7 @@ export function EarningsDrawer({ onClose }: { onClose: () => void }) {
             aria-label="Close drawer"
             style={{ width: 28, height: 28, padding: 0 }}
           >
-            ✕
+            <X size={14} />
           </button>
         </div>
 
@@ -62,7 +63,7 @@ export function EarningsDrawer({ onClose }: { onClose: () => void }) {
               </div>
               <div className="row" style={{ gap: 8 }}>
                 <NeoBadge variant="green">KYC {me.profile?.kyc_status ?? "APPROVED"}</NeoBadge>
-                <NeoBadge variant="primary">★ {me.rating ? me.rating.toFixed(1) : "5.0"}</NeoBadge>
+                <NeoBadge variant="primary"><Star size={11} fill="currentColor" /> {me.rating ? me.rating.toFixed(1) : "5.0"}</NeoBadge>
               </div>
             </NeoCard>
 

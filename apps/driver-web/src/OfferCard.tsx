@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatINR, paisa } from "@chalo/protocol";
+import { Rocket, Star, TriangleAlert, User } from "lucide-react";
 import { api, type Offer } from "./api";
 import { NeoCard, NeoButton, NeoBadge } from "./NeoComponents";
 
@@ -150,9 +151,9 @@ export function OfferCard({
           marginBottom: 12,
         }}
       >
-        <span>👤 {offer.riderName || "Rider"}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><User size={13} /> {offer.riderName || "Rider"}</span>
         <span>·</span>
-        <span>★ {offer.riderRating ? offer.riderRating.toFixed(1) : "4.8"}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Star size={12} fill="currentColor" /> {offer.riderRating ? offer.riderRating.toFixed(1) : "4.8"}</span>
         <span>·</span>
         <span style={{ color: "var(--primary)", fontWeight: 700 }}>100% earnings to wallet</span>
       </div>
@@ -175,8 +176,8 @@ export function OfferCard({
       </div>
 
       {error && (
-        <div className="error-text" style={{ marginBottom: 10 }}>
-          ⚠️ {error}
+        <div className="error-text" style={{ marginBottom: 10 }} role="alert">
+          <TriangleAlert size={14} /> {error}
         </div>
       )}
 
@@ -237,7 +238,7 @@ export function OfferCard({
             onClick={() => void accept()}
             style={{ flex: 2 }}
           >
-            Accept ({formatINR(paisa(offer.takeHomePaise))}) 🚀
+            Accept ({formatINR(paisa(offer.takeHomePaise))}) <Rocket size={15} />
           </NeoButton>
 
           {offer.negotiationId && (

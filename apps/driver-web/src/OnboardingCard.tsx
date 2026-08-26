@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileCheck2, LockKeyhole } from "lucide-react";
+import { BadgeCheck, FileCheck2, FileText, LockKeyhole } from "lucide-react";
 import { api } from "./api";
 import { NeoCard, NeoButton, NeoBadge, NeoInput } from "./NeoComponents";
 
@@ -103,7 +103,7 @@ export function OnboardingCard({
           disabled={plate.trim().length < 6}
           onClick={() => void submit()}
         >
-          Submit Documents for Review 📄
+          Submit Documents for Review
         </NeoButton>
 
         {status === "IN_REVIEW" && (
@@ -113,7 +113,7 @@ export function OnboardingCard({
             style={{ marginTop: 10 }}
             onClick={() => void approveDev()}
           >
-            Dev Instant Approve (Pilot Mode) ✓
+            Dev Instant Approve (Pilot Mode)
           </NeoButton>
         )}
 

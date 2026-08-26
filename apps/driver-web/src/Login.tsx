@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ArrowLeft, ArrowRight, Bike, Rocket, TriangleAlert } from "lucide-react";
 import { api, setToken } from "./api";
 import { NeoButton, NeoCard, NeoBadge, NeoInput } from "./NeoComponents";
 
@@ -49,7 +50,9 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
     <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative", background: "var(--paper)" }}>
       <NeoCard elevation="lg" style={{ width: "100%", maxWidth: 420, padding: 32, zIndex: 2, background: "#ffffff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <span style={{ fontSize: 28 }}>🛵</span>
+          <span style={{ color: "var(--green)", display: "grid", placeItems: "center", width: 40, height: 40, border: "var(--brut-border-thin)", borderRadius: "var(--radius-sm)", background: "#d1fae5" }}>
+            <Bike size={22} />
+          </span>
           <div>
             <h1 style={{ fontSize: 24, textTransform: "uppercase" }}>Driver Partner</h1>
             <NeoBadge variant="green">100% FARE TAKE-HOME</NeoBadge>
@@ -63,8 +66,8 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
         </p>
 
         {err && (
-          <div className="error-text" style={{ marginBottom: 16 }}>
-            ⚠️ {err}
+          <div className="error-text" style={{ marginBottom: 16 }} role="alert">
+            <TriangleAlert size={14} /> {err}
           </div>
         )}
 
@@ -92,10 +95,10 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
                 value={vehicleClass}
                 onChange={(e) => setVehicleClass(e.target.value)}
               >
-                <option value="BIKE">🏍️ Bike Taxi</option>
-                <option value="AUTO">🛺 Auto Rickshaw</option>
-                <option value="CAB_MINI">🚗 Mini Cab</option>
-                <option value="CAB_PRIME">🚘 Prime Sedan</option>
+                <option value="BIKE">Bike Taxi</option>
+                <option value="AUTO">Auto Rickshaw</option>
+                <option value="CAB_MINI">Mini Cab</option>
+                <option value="CAB_PRIME">Prime Sedan</option>
               </select>
 
               <NeoInput
@@ -131,7 +134,11 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
           )}
 
           <NeoButton variant="primary" fullWidth type="submit" disabled={busy}>
-            {busy ? "Authenticating..." : step === "PHONE" ? "Get Login Code →" : "Verify & Launch Radar 🚀"}
+            {busy
+              ? "Authenticating..."
+              : step === "PHONE"
+                ? <>Get Login Code <ArrowRight size={15} /></>
+                : <>Verify & Launch Radar <Rocket size={15} /></>}
           </NeoButton>
 
           {step === "OTP" && (
@@ -143,7 +150,7 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
               disabled={busy}
               onClick={() => setStep("PHONE")}
             >
-              ← Use a different number
+              <ArrowLeft size={14} /> Use a different number
             </NeoButton>
           )}
         </form>
@@ -155,7 +162,7 @@ export function Login({ onAuth }: { onAuth: (token: string) => void }) {
           style={{ marginTop: 14, fontSize: 12.5 }}
           onClick={() => window.open("http://localhost:5173/", "_blank")}
         >
-          Switch to Rider App →
+          Switch to Rider App <ArrowRight size={14} />
         </NeoButton>
       </NeoCard>
     </div>

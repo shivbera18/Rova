@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatINR, paisa, type TripView } from "@chalo/protocol";
+import { Flag, KeyRound, MapPin, Navigation, Rocket, TriangleAlert } from "lucide-react";
 import { api } from "./api";
 import { NeoCard, NeoButton, NeoBadge, NeoInput } from "./NeoComponents";
 
@@ -102,7 +103,7 @@ export function TripPanel({
         </div>
       </div>
 
-      {err && <div className="error-text" style={{ marginBottom: 12 }}>⚠️ {err}</div>}
+      {err && <div className="error-text" style={{ marginBottom: 12 }} role="alert"><TriangleAlert size={14} /> {err}</div>}
 
       <div style={{ marginBottom: 12 }}>
         <a
@@ -112,7 +113,7 @@ export function TripPanel({
           target="_blank"
           rel="noreferrer"
         >
-          📍 Open Navigation to {isPickupPhase ? "Pickup" : "Destination"}
+          <Navigation size={14} /> Open Navigation to {isPickupPhase ? "Pickup" : "Destination"}
         </a>
       </div>
 
@@ -123,7 +124,7 @@ export function TripPanel({
           disabled={busy}
           onClick={() => act(() => api.tripState(trip.id, "ARRIVING"))}
         >
-          🚀 I'm on my way (ARRIVING)
+          <Rocket size={15} /> I'm on my way (ARRIVING)
         </NeoButton>
       )}
 
@@ -134,7 +135,7 @@ export function TripPanel({
           disabled={busy}
           onClick={() => act(() => api.tripState(trip.id, "ARRIVED"))}
         >
-          📍 I have arrived at pickup
+          <MapPin size={15} /> I have arrived at pickup
         </NeoButton>
       )}
 
@@ -154,7 +155,7 @@ export function TripPanel({
             disabled={busy || otp.length < 4}
             onClick={() => act(() => api.startTrip(trip.id, otp))}
           >
-            Start Trip (Verify OTP) 🔑
+            Start Trip (Verify OTP) <KeyRound size={15} />
           </NeoButton>
         </div>
       )}
@@ -166,7 +167,7 @@ export function TripPanel({
           disabled={busy}
           onClick={() => act(() => api.completeTrip(trip.id, 0))}
         >
-          🏁 Complete Trip & Collect {fare ? formatINR(paisa(fare.agreedPaise)) : ""}
+          <Flag size={15} /> Complete Trip & Collect {fare ? formatINR(paisa(fare.agreedPaise)) : ""}
         </NeoButton>
       )}
 
@@ -174,7 +175,7 @@ export function TripPanel({
         <div style={{ textAlign: "center", marginTop: 8 }}>
           <NeoBadge variant="green" style={{ marginBottom: 10 }}>TRIP FINISHED</NeoBadge>
           <NeoButton variant="primary" fullWidth onClick={onFinished}>
-            Back to Live Radar 🚀
+            Back to Live Radar
           </NeoButton>
         </div>
       )}

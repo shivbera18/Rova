@@ -93,7 +93,7 @@ export interface DriverSocket {
 export function connectDriverSocket(
   token: string,
   onMessage: (msg: DriverWsMessage) => void,
-  onStatus: (connected: boolean) => void,
+  onStatus: (connected: boolean, closeCode?: number) => void,
 ): DriverSocket {
   let closed = false;
   let ws: WebSocket | null = null;
@@ -115,7 +115,8 @@ export function connectDriverSocket(
       ws = new WebSocket(`${proto}//${location.host}/ws/driver?ticket=${encodeURIComponent(ticket)}`);
       ws.onopen = () => onStatus(true);
       ws.onclose = (event) => {
-        onStatus(false);
+        // surface close codes so the UI can explain permanent locks (4009)
+        onStatus(false, event.code);
         if (!closed && event.code !== 4009) setTimeout(() => void open(), 2000);
       };
       ws.onerror = () => ws?.close();

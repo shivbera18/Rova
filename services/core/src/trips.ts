@@ -102,11 +102,13 @@ export async function createTripFromAgreement(
       JSON.stringify(fare),
     ],
   );
-  const retired = await sql.query(
-    "UPDATE ride_requests SET state='AGREED', version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING')",
+  // RETURNING keeps the affected-row signal honest across pg and PGlite
+  // (the embedded wrapper derives rowCount from rows.length).
+  const retired = await sql.query<{ id: string }>(
+    "UPDATE ride_requests SET state='AGREED', version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING') RETURNING id",
     [params.requestId],
   );
-  if (retired.rowCount === 0) {
+  if (retired.rows.length === 0) {
     // The request was cancelled/superseded mid-agreement; never mark a dead
     // request AGREED behind the rider's back.
     releaseClaim(params.requestId);

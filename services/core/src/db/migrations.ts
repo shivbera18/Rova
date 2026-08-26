@@ -153,6 +153,7 @@ export const MIGRATIONS = [
       user_id uuid NOT NULL REFERENCES users(id),
       name text NOT NULL,
       phone text NOT NULL,
+      position smallint NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id, phone)
     );

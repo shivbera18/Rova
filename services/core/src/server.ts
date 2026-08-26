@@ -994,7 +994,7 @@ export async function startServer(listenPort = PORT): Promise<{
   app.get("/v1/safety/contacts", async (req) => {
     const sess = requireAuth(await session(req));
     const rows = await sql.query<{ name: string; phone: string }>(
-      "SELECT name, phone FROM safety_contacts WHERE user_id=$1 ORDER BY created_at LIMIT 3",
+      "SELECT name, phone FROM safety_contacts WHERE user_id=$1 ORDER BY position, created_at LIMIT 3",
       [sess.userId],
     );
     return { contacts: rows.rows };
@@ -1025,11 +1025,12 @@ export async function startServer(listenPort = PORT): Promise<{
     }
     await sql.tx!(async (txSql) => {
       await txSql.query("DELETE FROM safety_contacts WHERE user_id=$1", [sess.userId]);
-      for (const c of parsed) {
-        await txSql.query("INSERT INTO safety_contacts (user_id, name, phone) VALUES ($1,$2,$3)", [
+      for (const [i, c] of parsed.entries()) {
+        await txSql.query("INSERT INTO safety_contacts (user_id, name, phone, position) VALUES ($1,$2,$3,$4)", [
           sess.userId,
           c.name,
           c.phone,
+          i,
         ]);
       }
     });

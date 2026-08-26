@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatINR, paisa, type TripView } from "@chalo/protocol";
-import { Flag, KeyRound, MapPin, Navigation, Rocket, TriangleAlert } from "lucide-react";
-import { api } from "./api";
+import { Flag, KeyRound, MapPin, Navigation, Rocket, Star, TriangleAlert } from "lucide-react";
+import { api, ApiError } from "./api";
 import { NeoCard, NeoButton, NeoBadge, NeoInput } from "./NeoComponents";
 
 const STATE_COPY: Record<string, string> = {
@@ -13,6 +13,92 @@ const STATE_COPY: Record<string, string> = {
   CANCELLED_RIDER: "Rider Cancelled",
   CANCELLED_DRIVER: "You Cancelled",
 };
+
+/** Post-ride rating of the rider — mirrors the rider's driver-rating card. */
+function RateRiderCard({ trip, onDone }: { trip: TripView; onDone: () => void }): React.ReactElement {
+  const [stars, setStars] = useState(trip.myRatingStars ?? 5);
+  const [comment, setComment] = useState("");
+  const [rated, setRated] = useState(trip.myRatingStars != null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (rated) {
+    return (
+      <div style={{ textAlign: "center", margin: "10px 0" }}>
+        <NeoBadge variant="green" style={{ marginBottom: 10 }}>
+          <Star size={11} fill="currentColor" /> You rated this rider {trip.myRatingStars ?? stars}
+        </NeoBadge>
+        <NeoButton variant="primary" fullWidth onClick={onDone}>
+          Back to Live Radar
+        </NeoButton>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 12, textAlign: "left" }}>
+      <div className="booking-divider"><span>RATE YOUR RIDER</span></div>
+      <p style={{ fontSize: 12.5, color: "var(--ink-soft)", textAlign: "center", margin: "8px 0" }}>
+        How was {(trip.riderName || "the rider").split(" ")[0]}?
+      </p>
+      <div className="star-row" role="radiogroup" aria-label="Rider rating">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            role="radio"
+            aria-checked={stars === n}
+            aria-label={`${n} star${n > 1 ? "s" : ""}`}
+            className={`star-btn ${n <= stars ? "on" : ""}`}
+            onClick={() => setStars(n)}
+          >
+            <Star size={20} fill={n <= stars ? "currentColor" : "none"} />
+          </button>
+        ))}
+      </div>
+      <NeoInput
+        label="Add a note (optional)"
+        placeholder="Anything worth mentioning?"
+        value={comment}
+        maxLength={280}
+        onChange={(e) => setComment(e.target.value)}
+      />
+      {err && (
+        <div className="error-text" role="alert" style={{ marginBottom: 8 }}>
+          <TriangleAlert size={13} /> {err}
+        </div>
+      )}
+      <div className="col" style={{ gap: 6 }}>
+        <NeoButton
+          variant="primary"
+          fullWidth
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            setErr(null);
+            void api
+              .rateTrip(trip.id, stars, comment.trim() || undefined)
+              .then(() => setRated(true))
+              .catch((e) => {
+                // rated elsewhere (other device) — treat as done, not an error
+                if (e instanceof ApiError && e.code === "ALREADY_RATED") {
+                  setRated(true);
+                  return;
+                }
+                setErr(e instanceof Error ? e.message : "Could not submit rating");
+              })
+              .finally(() => setBusy(false));
+          }}
+        >
+          Submit {stars}-star rating
+        </NeoButton>
+        <NeoButton variant="white" fullWidth onClick={onDone}>
+          Skip for now
+        </NeoButton>
+      </div>
+    </div>
+  );
+}
 
 export function TripPanel({
   tripId,
@@ -178,9 +264,7 @@ export function TripPanel({
       {trip.state === "COMPLETED" && (
         <div style={{ textAlign: "center", marginTop: 8 }}>
           <NeoBadge variant="green" style={{ marginBottom: 10 }}>TRIP FINISHED</NeoBadge>
-          <NeoButton variant="primary" fullWidth onClick={onFinished}>
-            Back to Live Radar
-          </NeoButton>
+          <RateRiderCard trip={trip} onDone={onFinished} />
         </div>
       )}
 

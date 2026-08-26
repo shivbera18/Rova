@@ -939,7 +939,15 @@ export async function startServer(listenPort = PORT): Promise<{
     if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {
       fail(403, "FORBIDDEN", "not your trip");
     }
-    return tripView(trip);
+    const mine = await sql.query<{ stars: number }>(
+      "SELECT stars FROM ratings WHERE trip_id=$1 AND rater_id=$2",
+      [id, sess.userId],
+    );
+    return {
+      ...tripView(trip),
+      riderName: trip.rider_name ?? undefined,
+      ...(mine.rows[0] ? { myRatingStars: mine.rows[0].stars } : {}),
+    };
   });
 
   app.post("/v1/trips/:id/regenerate-otp", async (req) => {
@@ -1386,7 +1394,10 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = requireAuth(await session(req));
     const { id } = req.params as { id: string };
     const { stars, comment } = req.body as { stars?: number; comment?: string };
-    if (!stars || stars < 1 || stars > 5) fail(400, "BAD_STARS", "stars 1..5 required");
+    if (!Number.isInteger(stars) || stars! < 1 || stars! > 5) fail(400, "BAD_STARS", "integer stars 1..5 required");
+    if (comment != null && (typeof comment !== "string" || comment.length > 500)) {
+      fail(400, "COMMENT_TOO_LONG", "rating comment is limited to 500 characters");
+    }
     const trip = await getTrip(sql, id);
     if (!trip || trip.state !== "COMPLETED") fail(409, "NOT_COMPLETED", "rate after completion");
     if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) {
@@ -1397,7 +1408,7 @@ export async function startServer(listenPort = PORT): Promise<{
       await sql.query(
         `INSERT INTO ratings (id, trip_id, rater_id, ratee_id, stars, comment)
          VALUES ($1,$2,$3,$4,$5,$6)`,
-        [randomUUID(), id, sess.userId, rateeId, Math.round(stars), comment ?? null],
+        [randomUUID(), id, sess.userId, rateeId, stars, comment ?? null],
       );
       const average = await sql.query<{ avg: string }>(
         "SELECT AVG(stars)::text AS avg FROM ratings WHERE ratee_id=$1",

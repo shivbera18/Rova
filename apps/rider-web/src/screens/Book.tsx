@@ -231,6 +231,7 @@ export default function Book(): React.ReactElement {
         if (!active || stale) return;
         const full = await getTrip(active.id);
         if (stale || !ACTIVE_TRIP_STATES.includes(full.state)) return;
+        if (full.myRatingStars != null) setRated(true);
         setLiveDriverPos(
           full.driverLat != null && full.driverLng != null
             ? { lat: full.driverLat, lng: full.driverLng }
@@ -326,6 +327,7 @@ export default function Book(): React.ReactElement {
     const iv = setInterval(() => {
       void getTrip(id)
         .then((t) => {
+          if (t.myRatingStars != null) setRated(true);
           setPhase((p) => {
             if (p.k !== "trip") return p;
             const merged = { ...t, otp: t.otp ?? p.trip.otp };

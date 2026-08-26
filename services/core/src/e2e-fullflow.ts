@@ -330,6 +330,17 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
     const badStars = await api(`/v1/trips/${tripId}/rate`, { stars: 9 }, riderToken);
     check("out-of-range stars rejected (400)", badStars.status === 400);
 
+    // driver rates the rider back — bidirectional ratings on real Postgres
+    const driverRate = await api(`/v1/trips/${tripId}/rate`, { stars: 4 }, driverToken);
+    check("driver rates rider (200)", driverRate.status === 200 && driverRate.json.ok === true);
+    const driverDup = await api(`/v1/trips/${tripId}/rate`, { stars: 5 }, driverToken);
+    check("driver duplicate rating rejected (409 ALREADY_RATED)", driverDup.status === 409 && driverDup.json.code === "ALREADY_RATED");
+    const tripView = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    check(
+      "trip view exposes rider name and own stars",
+      typeof tripView.json.riderName === "string" && tripView.json.myRatingStars === 4,
+    );
+
     const history = await api("/v1/trips", undefined, riderToken);
     check("completed trip appears in rider history", (history.json.trips ?? []).some((t: any) => t.id === tripId));
 

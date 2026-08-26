@@ -80,9 +80,12 @@ export const api = {
   startTrip: (id: string, otp: string) =>
     call<{ state: string }>(`/v1/trips/${id}/start`, "POST", { otp }),
   completeTrip: (id: string, tipPaise: number) =>
-    call<{ state: string; txnId: string }>(`/v1/trips/${id}/complete`, "POST", { tipPaise }),
-};
 
+    call<{ state: string; txnId: string }>(`/v1/trips/${id}/complete`, "POST", { tipPaise }),
+
+  rateTrip: (id: string, stars: number, comment?: string) =>
+    call<{ ok: true }>(`/v1/trips/${id}/rate`, "POST", { stars, comment }),
+};
 /** Raw WebSocket to /ws/driver with auto-reconnect. */
 export interface DriverSocket {
   send(msg: unknown): void;

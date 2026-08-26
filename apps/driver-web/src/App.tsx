@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { formatINR, paisa, type LatLon } from "@chalo/protocol";
-import { Bell, LogOut, Play, Square } from "lucide-react";
+import { Bell, LogOut, Play, Square, TriangleAlert } from "lucide-react";
 import { clearToken, connectDriverSocket, getToken, api, type DriverSocket } from "./api";
 import { Login } from "./Login";
 import { DriverLanding } from "./Landing";
@@ -31,6 +31,8 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
   const [myPos, setMyPos] = useState<LatLon>({ lat: 12.9352, lng: 77.6245 });
   const [me, setMe] = useState<DriverMe | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [wsClosedCode, setWsClosedCode] = useState<number | null>(null);
 
   const onlineRef = useRef(online);
   const [pushState, setPushState] = useState<NotificationPermission>(
@@ -46,6 +48,8 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
       .driverMe()
       .then((res) => {
         setMe(res);
+        // the server persists the online flag across shifts — honour it
+        if (res.profile?.online) setOnline(true);
       })
       .catch(() => {
         setMe(null);
@@ -95,11 +99,15 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
           }
         }
       },
-      (isConnected) => {
+      (isConnected, closeCode) => {
         if (destroyed) return;
         setConnected(isConnected);
         if (isConnected) {
+          setWsClosedCode(null);
           sock.send({ t: "pos.update", lat: posRef.current.lat, lng: posRef.current.lng });
+        } else if (closeCode === 4009) {
+          // duplicate-tab lockout is permanent until the other tab closes
+          setWsClosedCode(4009);
         }
       },
     );
@@ -115,12 +123,21 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
     const watch = navigator.geolocation.watchPosition(
       (pos) => {
         const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setGpsError(null);
         setMyPos(next);
         if (onlineRef.current) {
           sockRef.current?.send({ t: "pos.update", lat: next.lat, lng: next.lng });
         }
       },
-      () => {},
+      (err) => {
+        setGpsError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied — you will not receive nearby requests"
+            : err.code === err.POSITION_UNAVAILABLE
+              ? "Location unavailable — check GPS settings"
+              : "Location timeout — waiting for a fix",
+        );
+      },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
     );
     return () => navigator.geolocation.clearWatch(watch);
@@ -164,6 +181,43 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="app-shell" style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
+      {wsClosedCode === 4009 && (
+        <div
+          role="alert"
+          className="row"
+          style={{
+            gap: 10,
+            padding: "10px 14px",
+            background: "#fff7ed",
+            borderBottom: "var(--brut-border-thin)",
+            fontSize: 12.5,
+            fontWeight: 700,
+            alignItems: "center",
+          }}
+        >
+          <TriangleAlert size={15} color="#ea580c" />
+          <span style={{ flex: 1 }}>Chalo-X Driver is open in another tab or window. Close it, then reload here.</span>
+          <button className="brut-btn brut-btn-sm brut-btn-primary" onClick={() => location.reload()}>
+            Reload
+          </button>
+        </div>
+      )}
+      {gpsError && (
+        <div
+          role="alert"
+          className="row"
+          style={{
+            gap: 8,
+            padding: "8px 14px",
+            background: "#fef2f2",
+            borderBottom: "var(--brut-border-thin)",
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          <TriangleAlert size={14} color="#dc2626" /> {gpsError}
+        </div>
+      )}
       <header className="topbar">
         <Link to="/" className="brand-badge">
           CHALO<span className="brand-accent">-X</span> DRIVER
@@ -176,7 +230,13 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
         <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
           <button
             className={`brut-btn brut-btn-sm ${online ? "brut-btn-red" : "brut-btn-green"}`}
-            onClick={() => setOnline((prev) => !prev)}
+            onClick={() => {
+              const next = !online;
+              setOnline(next);
+              if (!next) setWsClosedCode(null);
+              // persist across refreshes/shifts; revert the toggle on failure
+              void api.updateStatus({ online: next }).catch(() => setOnline(!next));
+            }}
           >
             {online ? <Square size={13} /> : <Play size={13} />}
             {online ? "Go Offline" : "Go Online"}

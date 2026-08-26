@@ -145,6 +145,21 @@ export const MIGRATIONS = [
 
     ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS pickup_label text;
     ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS drop_label text;
+
+    -- live journey sharing: opaque per-trip token, minted on demand
+    ALTER TABLE trips ADD COLUMN IF NOT EXISTS share_token text UNIQUE;
+
+    CREATE TABLE IF NOT EXISTS safety_contacts (
+      user_id uuid NOT NULL REFERENCES users(id),
+      name text NOT NULL,
+      phone text NOT NULL,
+      position smallint NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, phone)
+    );
+    -- CREATE IF NOT EXISTS is a no-op on databases that predate this table's
+    -- position column — backfill it the same way as the label columns above.
+    ALTER TABLE safety_contacts ADD COLUMN IF NOT EXISTS position smallint NOT NULL DEFAULT 0;
     `,
   },
 ];

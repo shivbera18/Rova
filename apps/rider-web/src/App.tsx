@@ -8,6 +8,7 @@ import Book from "./screens/Book";
 import History from "./screens/History";
 import { enablePushNotifications, pushSupported } from "./push";
 import { SafetyPanel } from "./components/SafetyPanel";
+import { SharePage } from "./components/SharePage";
 
 function RiderConsole({
   logout,
@@ -118,7 +119,10 @@ export default function App(): React.ReactElement {
         }
       />
 
-      {/* Route 3: Authenticated Rider Workspace (/book, /history) */}
+      {/* Route 3: Public live journey share page */}
+      <Route path="/share/:token" element={<SharePage />} />
+
+      {/* Route 4: Authenticated Rider Workspace (/book, /history) */}
       <Route
         path="/book"
         element={

@@ -106,6 +106,8 @@ export interface TripRow {
   /** joined from ride_requests for display */
   pickup_label?: string | null;
   drop_label?: string | null;
+  /** minted on demand for live journey sharing */
+  share_token?: string | null;
 }
 
 export type LedgerReason =

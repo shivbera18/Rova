@@ -5,7 +5,7 @@
  *   /ws/rider /ws/driver             realtime channels (token in query string)
  * Storage: PG when DATABASE_URL set, else embedded PGlite auto-migrated on boot.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
@@ -915,6 +915,126 @@ export async function startServer(listenPort = PORT): Promise<{
       if (err instanceof TripError) fail(409, err.code, err.message);
       throw err;
     }
+  });
+
+  app.post("/v1/trips/:id/share-link", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    const trip = await getTrip(sql, id);
+    if (!trip || trip.rider_id !== sess.userId) fail(404, "NOT_FOUND", "no such trip");
+    if (["CANCELLED_RIDER", "CANCELLED_DRIVER"].includes(trip.state)) {
+      fail(409, "NOT_SHAREABLE", "cancelled trips cannot be shared");
+    }
+    let token = trip.share_token ?? null;
+    if (!token) {
+      const minted = randomBytes(16).toString("base64url");
+      const upd = await sql.query<{ share_token: string }>(
+        "UPDATE trips SET share_token=$2 WHERE id=$1 AND share_token IS NULL RETURNING share_token",
+        [id, minted],
+      );
+      // A concurrent mint may have won the guarded UPDATE — always trust the row.
+      token = upd.rows[0]?.share_token
+        ?? (await sql.query<{ share_token: string }>("SELECT share_token FROM trips WHERE id=$1", [id])).rows[0]!
+          .share_token!;
+    }
+    const origin = process.env.PUBLIC_ORIGIN;
+    if (!origin && process.env.NODE_ENV === "production") {
+      fail(500, "SHARE_UNCONFIGURED", "PUBLIC_ORIGIN must be set to build share links");
+    }
+    return { url: `${origin ?? `${req.protocol}://${req.headers.host ?? "localhost:5173"}`}/share/${token}` };
+  });
+
+  // Public, unauthenticated: the whole point of a journey-share link.
+  app.get("/v1/share/:token", async (req) => {
+    const { token } = req.params as { token: string };
+    const r = (
+      await sql.query<{
+        state: string;
+        vehicle_class: string;
+        pickup_lat: number;
+        pickup_lng: number;
+        drop_lat: number;
+        drop_lng: number;
+        pickup_label: string | null;
+        drop_label: string | null;
+        started_at: Date | null;
+        ended_at: Date | null;
+        driver_id: string;
+        driver_name: string | null;
+        plate: string | null;
+      }>(
+        `SELECT t.state, t.vehicle_class, t.pickup_lat, t.pickup_lng, t.drop_lat, t.drop_lng,
+                r.pickup_label, r.drop_label, t.started_at, t.ended_at,
+                t.driver_id, u.full_name AS driver_name, d.plate
+         FROM trips t
+         JOIN ride_requests r ON r.id=t.request_id
+         JOIN users u ON u.id=t.driver_id
+         LEFT JOIN driver_profiles d ON d.user_id=t.driver_id
+         WHERE t.share_token=$1`,
+        [token],
+      )
+    ).rows[0];
+    if (!r) fail(404, "NOT_FOUND", "this journey link is not valid");
+    const pos = getLiveDriver(r.driver_id);
+    return {
+      state: r.state,
+      vehicleClass: r.vehicle_class,
+      driverFirstName: (r.driver_name ?? "").split(" ")[0] || null,
+      driverPlate: r.plate,
+      pickup: { lat: Math.round(r.pickup_lat * 1000) / 1000, lng: Math.round(r.pickup_lng * 1000) / 1000 },
+      drop: { lat: Math.round(r.drop_lat * 1000) / 1000, lng: Math.round(r.drop_lng * 1000) / 1000 },
+      pickupLabel: r.pickup_label,
+      dropLabel: r.drop_label,
+      startedAt: r.started_at ? new Date(r.started_at).toISOString() : undefined,
+      endedAt: r.ended_at ? new Date(r.ended_at).toISOString() : undefined,
+      driverLivePos: ["ONGOING", "ARRIVING"].includes(r.state) && pos ? { lat: pos.pos.lat, lng: pos.pos.lng } : undefined,
+    };
+  });
+
+  app.get("/v1/safety/contacts", async (req) => {
+    const sess = requireAuth(await session(req));
+    const rows = await sql.query<{ name: string; phone: string }>(
+      "SELECT name, phone FROM safety_contacts WHERE user_id=$1 ORDER BY position, created_at LIMIT 3",
+      [sess.userId],
+    );
+    return { contacts: rows.rows };
+  });
+
+  app.put("/v1/safety/contacts", async (req) => {
+    const sess = requireAuth(await session(req));
+    const body = req.body as { contacts?: Array<{ name?: string; phone?: string }> };
+    const list = Array.isArray(body.contacts) ? body.contacts.slice(0, 3) : [];
+    const cleanName = (s: unknown): string =>
+      Array.from(String(s ?? ""))
+        .filter((ch) => {
+          const cp = ch.codePointAt(0) ?? 0;
+          return cp > 31 && cp !== 127 && cp !== 173;
+        })
+        .slice(0, 80)
+        .join("")
+        .trim();
+    const parsed: Array<{ name: string; phone: string }> = [];
+    for (const c of list) {
+      const name = cleanName(c.name);
+      const phone = typeof c.phone === "string" ? c.phone.trim() : "";
+      if (!name || !/^\+[0-9]{10,15}$/.test(phone)) {
+        fail(400, "BAD_CONTACT", "each contact needs a name and an E.164 phone");
+      }
+      if (parsed.some((p) => p.phone === phone)) continue;
+      parsed.push({ name, phone });
+    }
+    await sql.tx!(async (txSql) => {
+      await txSql.query("DELETE FROM safety_contacts WHERE user_id=$1", [sess.userId]);
+      for (const [i, c] of parsed.entries()) {
+        await txSql.query("INSERT INTO safety_contacts (user_id, name, phone, position) VALUES ($1,$2,$3,$4)", [
+          sess.userId,
+          c.name,
+          c.phone,
+          i,
+        ]);
+      }
+    });
+    return { ok: true, contacts: parsed };
   });
 
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {

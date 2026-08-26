@@ -39,6 +39,7 @@ export default function OfferSheet({
   pickupLabel,
   dropLabel,
   payMethod,
+  walletBalance,
   onClose,
   onBooked,
 }: {
@@ -48,6 +49,7 @@ export default function OfferSheet({
   pickupLabel?: string;
   dropLabel?: string;
   payMethod: string;
+  walletBalance?: number | null;
   onClose: () => void;
   onBooked: (session: RequestSessionView) => void;
 }): React.ReactElement {
@@ -60,6 +62,13 @@ export default function OfferSheet({
   const platformPaise = paiseFromInput(platformInput);
   const amountsValid = driverPaise >= 0 && platformPaise >= 0;
   const totalPaise = Math.max(0, driverPaise) + Math.max(0, platformPaise);
+  // Pre-warning: direct bookings charge list price, offers charge the inputs.
+  const shortOfOffer = payMethod === "WALLET" && walletBalance != null && walletBalance < totalPaise;
+  const shortOfStandard = payMethod === "WALLET" && walletBalance != null && walletBalance < quote.listPrice;
+  const walletShort = shortOfOffer || shortOfStandard;
+  const shortfall = walletShort
+    ? Math.min(totalPaise, quote.listPrice) - (walletBalance ?? 0)
+    : 0;
   const savingsVsList = quote.listPrice - totalPaise;
   const meta = VEHICLE_META[quote.vehicleClass] ?? { label: quote.vehicleClass, icon: Car, seats: "4 seats" };
   const Icon = meta.icon;
@@ -268,6 +277,16 @@ export default function OfferSheet({
         )}
       </div>
 
+      {walletShort && (
+        <div
+          className="brut-badge brut-badge-red"
+          style={{ width: "100%", padding: "8px 12px", marginBottom: 12, textTransform: "none", fontSize: 13 }}
+          role="alert"
+        >
+          <TriangleAlert size={14} /> Wallet is {formatINR(paisa(shortfall))} short of this fare — switch payment method or add money
+        </div>
+      )}
+
       {error && (
         <div
           className="brut-badge brut-badge-red"
@@ -283,7 +302,7 @@ export default function OfferSheet({
         <button
           className="brut-btn brut-btn-primary"
           style={{ flex: 1, padding: "12px 18px", fontSize: 14 }}
-          disabled={busy || !amountsValid}
+          disabled={busy || !amountsValid || shortOfOffer}
           onClick={() => void submit(true)}
         >
           Send {formatINR(paisa(totalPaise))} Offer
@@ -291,7 +310,7 @@ export default function OfferSheet({
         <button
           className="brut-btn brut-btn-white"
           style={{ padding: "12px 18px", fontSize: 14 }}
-          disabled={busy}
+          disabled={busy || shortOfStandard}
           onClick={() => void submit(false)}
         >
           Book Standard

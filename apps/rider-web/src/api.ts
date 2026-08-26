@@ -129,6 +129,20 @@ export function createRequest(r: CreateRequestBody): Promise<RequestSessionView>
   return api<RequestSessionView>("/v1/requests", { body: r });
 }
 
+// ---- safety centre -------------------------------------------------------------
+
+export function getShareLink(tripId: string): Promise<{ url: string }> {
+  return api(`/v1/trips/${tripId}/share-link`, { method: "POST", body: {} });
+}
+
+export function getContacts(): Promise<{ contacts: Array<{ name: string; phone: string }> }> {
+  return api("/v1/safety/contacts");
+}
+
+export function saveContacts(contacts: { contacts: Array<{ name?: string; phone?: string }> }): Promise<{ ok: true }> {
+  return api("/v1/safety/contacts", { method: "PUT", body: contacts });
+}
+
 // ---- negotiation (rider side) ------------------------------------------------
 // Stable domain endpoints shared with the driver console's mirror functions.
 

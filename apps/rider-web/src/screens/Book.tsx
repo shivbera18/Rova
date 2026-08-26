@@ -430,6 +430,7 @@ export default function Book(): React.ReactElement {
 
   function reset(): void {
     stopPoll();
+    localStorage.removeItem("chalox.rider.trip");
     setPickup(null);
     setPickupLabel("");
     setDrop(null);
@@ -437,6 +438,19 @@ export default function Book(): React.ReactElement {
     setError(null);
     setPhase({ k: "pick" });
   }
+
+  // Remember the in-flight trip so the safety centre can share its live link.
+  useEffect(() => {
+    if ((phase.k === "trip" || phase.k === "done") && !["CANCELLED_RIDER", "CANCELLED_DRIVER"].includes(phase.trip.state)) {
+      localStorage.setItem(
+        "chalox.rider.trip",
+        JSON.stringify({ id: phase.trip.id, state: phase.trip.state }),
+      );
+    } else {
+      // cancelled/finished rides must not linger as shareable "live" trips
+      localStorage.removeItem("chalox.rider.trip");
+    }
+  }, [phase]);
 
   return (
     <div className="book-wrap">
@@ -663,6 +677,7 @@ export default function Book(): React.ReactElement {
             pickupLabel={pickupLabel}
             dropLabel={dropLabel}
             payMethod={payMethod}
+            walletBalance={walletBalance}
             onClose={() => setPhase({ k: "quotes", quotes: [phase.quote] })}
             onBooked={(session) => {
               setPhase({ k: "matching", session, counter: null, quote: phase.quote });
@@ -848,6 +863,70 @@ export default function Book(): React.ReactElement {
             <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
               Total paid: {formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}
             </p>
+
+            {/* Receipt — printable via the browser's Save-as-PDF */}
+            <div className="booking-divider"><span>RECEIPT</span></div>
+            <div className="print-area" style={{ fontSize: 12.5 }}>
+              <div className="spread" style={{ marginBottom: 6 }}>
+                <strong style={{ fontFamily: "var(--font-display)" }}>Chalo-X Ride Invoice</strong>
+                <span style={{ color: "var(--ink-muted)" }}>#{phase.trip.id.slice(0, 8).toUpperCase()}</span>
+              </div>
+              {(pickupLabel || dropLabel) && (
+                <p style={{ color: "var(--ink-soft)", marginBottom: 6 }}>
+                  {pickupLabel ?? "Pickup"} → {dropLabel ?? "Drop"}
+                </p>
+              )}
+              {phase.trip.startedAt && (
+                <div className="spread">
+                  <span style={{ color: "var(--ink-muted)" }}>Started</span>
+                  <span>{new Date(phase.trip.startedAt).toLocaleString()}</span>
+                </div>
+              )}
+              {phase.trip.endedAt ? (
+                <div className="spread">
+                  <span style={{ color: "var(--ink-muted)" }}>Completed</span>
+                  <span>{new Date(phase.trip.endedAt).toLocaleString()}</span>
+                </div>
+              ) : (
+                <div className="spread">
+                  <span style={{ color: "var(--ink-muted)" }}>Booked</span>
+                  <span>{new Date().toLocaleString()}</span>
+                </div>
+              )}
+              <div className="spread" style={{ marginTop: 6 }}>
+                <span style={{ color: "var(--ink-muted)" }}>Payment method</span>
+                <span>{phase.trip.paymentMethod ?? "UPI"}</span>
+              </div>
+              <hr style={{ border: "none", borderTop: "1px dashed var(--ink-muted)", margin: "8px 0" }} />
+              <div className="spread">
+                <span>Ride fare</span>
+                <span>{formatINR(paisa(phase.trip.fareBreakdown.agreedPaise))}</span>
+              </div>
+              {phase.trip.fareBreakdown.platformFeePaise > 0 && (
+                <div className="spread">
+                  <span>Platform fee</span>
+                  <span>{formatINR(paisa(phase.trip.fareBreakdown.platformFeePaise))}</span>
+                </div>
+              )}
+              {(phase.trip.fareBreakdown.tipPaise ?? 0) > 0 && (
+                <div className="spread">
+                  <span>Driver tip</span>
+                  <span>{formatINR(paisa(phase.trip.fareBreakdown.tipPaise!))}</span>
+                </div>
+              )}
+              <div className="spread" style={{ fontWeight: 800, marginTop: 4 }}>
+                <span>Total</span>
+                <span>{formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}</span>
+              </div>
+            </div>
+            <NeoButton
+              variant="white"
+              size="sm"
+              onClick={() => window.print()}
+              aria-label="Print or save this receipt as PDF"
+            >
+              Print / Save PDF
+            </NeoButton>
 
             <div className="booking-divider"><span>RATE YOUR DRIVER</span></div>
             {rated ? (

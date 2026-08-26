@@ -363,6 +363,16 @@ export async function startServer(listenPort = PORT): Promise<{
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.driverId)) {
         fail(400, "BAD_BODY", "bad driverId");
       }
+      // Direct dispatch is a favourites-only feature — arbitrary driver
+      // targeting would let riders spam any specific driver with pushes.
+      const favourited = await sql.query(
+        "SELECT 1 FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2",
+        [sess.userId, body.driverId],
+      );
+      if (favourited.rows.length === 0) {
+        fail(403, "NOT_A_FAVOURITE", "save this driver to request them directly");
+      }
+      enforceRateLimit(`direct:${sess.userId}:${body.driverId}`, 3, 10 * 60_000);
       const prof = (
         await sql.query<{ kyc_status: string; vehicle_class: string }>(
           "SELECT kyc_status, vehicle_class FROM driver_profiles WHERE user_id=$1",

@@ -1138,13 +1138,6 @@ export async function startServer(listenPort = PORT): Promise<{
     return { ok: true };
   });
 
-  app.delete("/v1/drivers/:id/favorite", async (req) => {
-    const sess = requireRider(await session(req));
-    const { id } = req.params as { id: string };
-    await sql.query("DELETE FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2", [sess.userId, id]);
-    return { ok: true };
-  });
-
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {
     const fare = readFareJson(trip.fare_json);
     const driver = getLiveDriver(trip.driver_id);

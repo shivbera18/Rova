@@ -56,12 +56,18 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(req, copy));
+          // Cache.put rejects navigate-mode requests — key the SPA shell by URL.
+          // Only cache good responses so a 5xx never becomes the offline shell.
+          if (res.ok && res.type === "basic") {
+            const copy = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(new Request("/", { method: "GET" }), copy));
+          }
           return res;
         })
         .catch(() =>
-          caches.match(req).then((hit) => hit || caches.match("/") || caches.match("/offline.html")),
+          caches
+            .match("/")
+            .then((hit) => hit || caches.match("/offline.html")),
         ),
     );
     return;

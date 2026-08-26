@@ -75,6 +75,8 @@ export interface BroadcastOffer {
   paymentMethod: string;
   /** only push to drivers of this class (or ALL in dev mode) */
   vehicleClass: string;
+  /** direct-to-driver ("ride again") requests deliver to exactly this driver */
+  onlyDriverId?: string | null;
   /** optional side channel (Web Push) after socket delivery */
   notify?: (driverId: string) => void;
   pickup: LatLon;
@@ -101,6 +103,12 @@ export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
   );
 
   for (const d of allDrivers) {
+    if (offer.onlyDriverId && d.driverId !== offer.onlyDriverId) {
+      logger.dispatch(
+        `  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) SKIPPED: direct request for another driver`,
+      );
+      continue;
+    }
     if (d.vehicleClass !== offer.vehicleClass) {
       logger.dispatch(
         `  -> Driver ${d.driverId.slice(0, 8)} (${d.name}) SKIPPED: vehicle class mismatch (driver=${d.vehicleClass}, requested=${offer.vehicleClass})`,
@@ -136,6 +144,7 @@ export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
       drop: offer.drop,
       ...(offer.pickupLabel ? { pickupLabel: offer.pickupLabel } : {}),
       ...(offer.dropLabel ? { dropLabel: offer.dropLabel } : {}),
+      ...(offer.onlyDriverId ? { isRepeatRequest: true } : {}),
       paymentMethod: offer.paymentMethod as DriverOfferPayload["paymentMethod"],
     };
     const sent = d.push({ t: "dispatch.offer", offer: payload });

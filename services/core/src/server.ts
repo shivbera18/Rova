@@ -466,6 +466,7 @@ export async function startServer(listenPort = PORT): Promise<{
       drop: body.drop!,
       pickupLabel: clean(body.pickupLabel),
       dropLabel: clean(body.dropLabel),
+      onlyDriverId: requestedDriverId,
       expiresAt: expiresAt.toISOString(),
       round: 1,
       isCounter: false,
@@ -497,6 +498,7 @@ export async function startServer(listenPort = PORT): Promise<{
     drop: LatLon;
     pickupLabel?: string | null;
     dropLabel?: string | null;
+    onlyDriverId?: string | null;
     expiresAt: string;
     round: number;
     isCounter: boolean;
@@ -522,6 +524,7 @@ export async function startServer(listenPort = PORT): Promise<{
       drop: o.drop,
       pickupLabel: o.pickupLabel ?? null,
       dropLabel: o.dropLabel ?? null,
+      onlyDriverId: o.onlyDriverId ?? null,
       tripKm: km,
       expiresAt: o.expiresAt,
       round: o.round,
@@ -723,8 +726,9 @@ export async function startServer(listenPort = PORT): Promise<{
           payment_method: string;
           pickup_label: string | null;
           drop_label: string | null;
+          requested_driver_id: string | null;
         }>(
-          "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng, payment_method, pickup_label, drop_label FROM ride_requests WHERE id=$1",
+          "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng, payment_method, pickup_label, drop_label, requested_driver_id FROM ride_requests WHERE id=$1",
           [updated.request_id],
         )
       ).rows[0]!;
@@ -736,6 +740,7 @@ export async function startServer(listenPort = PORT): Promise<{
         drop: { lat: rr.drop_lat, lng: rr.drop_lng },
         pickupLabel: rr.pickup_label,
         dropLabel: rr.drop_label,
+        onlyDriverId: rr.requested_driver_id,
         expiresAt: new Date(updated.expires_at).toISOString(),
         round: updated.round,
         isCounter: true,

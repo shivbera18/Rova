@@ -76,6 +76,8 @@ export interface DriverOfferPayload {
   drop: LatLon;
   pickupLabel?: string;
   dropLabel?: string;
+  /** direct-to-driver ("ride again") request — show a repeat-rider badge */
+  isRepeatRequest?: boolean;
   paymentMethod: PaymentMethod;
 }
 

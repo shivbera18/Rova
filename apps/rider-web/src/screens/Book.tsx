@@ -663,6 +663,7 @@ export default function Book(): React.ReactElement {
             pickupLabel={pickupLabel}
             dropLabel={dropLabel}
             payMethod={payMethod}
+            walletBalance={walletBalance}
             onClose={() => setPhase({ k: "quotes", quotes: [phase.quote] })}
             onBooked={(session) => {
               setPhase({ k: "matching", session, counter: null, quote: phase.quote });

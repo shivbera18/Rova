@@ -131,9 +131,13 @@ Create `services/core/.env` (or copy from `services/core/.env.example`):
 ```env
 PORT=8080
 DATABASE_URL=postgres://chalo:chalo@localhost:5432/chalox
-JWT_SECRET=super-secret-dev-key-rotate-in-production
+JWT_SECRET=dev-only-secret-rotate-before-any-real-deploy
 NODE_ENV=development
+ENABLE_DEV_ENDPOINTS=1
 ```
+> `ENABLE_DEV_ENDPOINTS=1` is **required for dev OTP logins (123456)** and the
+> wallet top-up button. Without it, login returns `OTP_UNAVAILABLE`. Never set
+> it on a deployed environment.
 
 ### Step 3: Migrate & Seed PostgreSQL
 ```bash

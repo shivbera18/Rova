@@ -32,7 +32,11 @@ async function call<T>(path: string, method: string, body?: unknown): Promise<T>
   const json: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = json as { code?: string; message?: string };
-    if (res.status === 401 || (res.status === 403 && e.code === "FORBIDDEN")) {
+    // Only genuine session failures sign the driver out. A wrong start OTP is
+    // also 401 (BAD_OTP) and must never kick them to the login screen.
+    const sessionDead =
+      (res.status === 401 && e.code !== "BAD_OTP") || (res.status === 403 && e.code === "FORBIDDEN");
+    if (sessionDead) {
       clearToken();
       window.dispatchEvent(new Event("storage"));
     }

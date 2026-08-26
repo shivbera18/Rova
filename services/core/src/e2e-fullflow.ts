@@ -302,12 +302,12 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
     check("rider sees ARRIVED state", st.json.state === "ARRIVED");
 
     const wrongOtp = await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
-    check("wrong start OTP rejected (401)", wrongOtp.status === 401);
+    check("wrong start OTP rejected (401 BAD_OTP)", wrongOtp.status === 401 && wrongOtp.json.code === "BAD_OTP");
 
     // 3-strike lock: two more wrong tries exhaust the budget, the next is locked
     await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
     const thirdWrong = await api(`/v1/trips/${tripId}/start`, { otp: "111111" }, riderToken);
-    check("third wrong OTP still 401", thirdWrong.status === 401);
+    check("third wrong OTP still 401 BAD_OTP", thirdWrong.status === 401 && thirdWrong.json.code === "BAD_OTP");
     const lockedStart = await api(`/v1/trips/${tripId}/start`, { otp: "222222" }, riderToken);
     check("fourth attempt locked out (409 OTP_LOCKED)", lockedStart.status === 409 && lockedStart.json.code === "OTP_LOCKED");
     const attemptsView = await api(`/v1/trips/${tripId}`, undefined, driverToken);

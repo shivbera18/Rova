@@ -93,13 +93,17 @@ export function TripPanel({
           marginBottom: 12,
         }}
       >
-        <div className="spread" style={{ fontSize: 12, padding: "2px 0" }}>
-          <span style={{ color: "var(--ink-muted)", fontWeight: 700 }}>Pickup</span>
-          <strong style={{ fontSize: 11.5 }}>{trip.pickup.lat.toFixed(4)}, {trip.pickup.lng.toFixed(4)}</strong>
+        <div className="spread" style={{ fontSize: 12, padding: "2px 0", alignItems: "flex-start" }}>
+          <span style={{ color: "var(--ink-muted)", fontWeight: 700, flexShrink: 0 }}>Pickup</span>
+          <strong style={{ fontSize: 11.5, textAlign: "right" }}>
+            {trip.pickupLabel ?? `${trip.pickup.lat.toFixed(4)}, ${trip.pickup.lng.toFixed(4)}`}
+          </strong>
         </div>
-        <div className="spread" style={{ fontSize: 12, padding: "2px 0" }}>
-          <span style={{ color: "var(--ink-muted)", fontWeight: 700 }}>Drop</span>
-          <strong style={{ fontSize: 11.5 }}>{trip.drop.lat.toFixed(4)}, {trip.drop.lng.toFixed(4)}</strong>
+        <div className="spread" style={{ fontSize: 12, padding: "2px 0", alignItems: "flex-start" }}>
+          <span style={{ color: "var(--ink-muted)", fontWeight: 700, flexShrink: 0 }}>Drop</span>
+          <strong style={{ fontSize: 11.5, textAlign: "right" }}>
+            {trip.dropLabel ?? `${trip.drop.lat.toFixed(4)}, ${trip.drop.lng.toFixed(4)}`}
+          </strong>
         </div>
       </div>
 

@@ -920,3 +920,23 @@ h4 {
 button, a, input, select {
   min-height: 40px;
 }
+
+/* ============ Print: receipt only ============ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+    color: #000 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+  .print-area {
+    position: absolute;
+    inset: 0;
+    padding: 24px;
+    font-size: 12pt;
+  }
+}

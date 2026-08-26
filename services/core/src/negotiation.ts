@@ -41,19 +41,28 @@ export async function createNegotiation(
   // one active negotiation per rider per city — cancel any prior live one and
   // retire its request row so stale MATCHING/NEGOTIATING rows don't accumulate
   // with dispatch claims still held against them.
-  const superseded = await sql.query<{ request_id: string }>(
+  const superseded = await sql.query<{ id: string; request_id: string; state: string; round: number }>(
     `UPDATE negotiations SET state='CANCELLED', version=version+1
      WHERE rider_id=$1 AND state IN ('BROADCASTING','COUNTERED_DRIVER','COUNTERED_RIDER')
-     RETURNING request_id`,
+     RETURNING id, request_id, state, round`,
     [riderId],
   );
   const supersededRequestIds = [...new Set(superseded.rows.map((r) => r.request_id))];
+  for (const row of superseded.rows) {
+    await appendEvent(sql, row.id, "RIDER", "RIDER_CANCEL", null, row.round);
+    await publish(TOPICS.negotiationEvent, {
+      negotiationId: row.id,
+      requestId: row.request_id,
+      action: "RIDER_CANCEL",
+      from: row.state,
+      to: "CANCELLED",
+    });
+  }
   for (const reqId of supersededRequestIds) {
     await sql.query(
       "UPDATE ride_requests SET state='CANCELLED', version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING')",
       [reqId],
     );
-    await publish(TOPICS.negotiationEvent, { action: "RIDER_CANCEL", to: "CANCELLED", requestId: reqId });
   }
 
   const id = randomUUID();

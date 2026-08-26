@@ -892,6 +892,7 @@ export async function startServer(listenPort = PORT): Promise<{
     } else if (existing !== driverId) {
       fail(409, "ALREADY_CLAIMED", "another driver won this ride");
     }
+    void cancelBroadcast(requestId);
 
     const rr = (
       await sql.query<{
@@ -970,6 +971,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const active = await sql.query<{ rider_id: string }>(
       `SELECT rider_id FROM trips
        WHERE driver_id=$1 AND state IN ('DRIVER_ASSIGNED','ARRIVING','ARRIVED','ONGOING')
+       ORDER BY created_at DESC
        LIMIT 1`,
       [driverId],
     );

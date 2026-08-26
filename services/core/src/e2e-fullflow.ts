@@ -227,6 +227,10 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
   }
 
   // ---- shared sockets ---------------------------------------------------------
+  // Declare our own online state + position: the seeded driver's persisted
+  // online flag and last position survive between runs (and manual dev
+  // sessions), so the suite must not inherit whatever was left behind.
+  await api("/v1/driver/status", { online: true, lat: PICKUP.lat, lng: PICKUP.lng }, driverToken);
   const riderWs = new WsBus(`${BASE.replace("http", "ws")}/ws/rider`, await wsTicket(riderToken));
   const driverWs = new WsBus(`${BASE.replace("http", "ws")}/ws/driver`, await wsTicket(driverToken));
   await riderWs.ready();
@@ -300,7 +304,16 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
     const wrongOtp = await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
     check("wrong start OTP rejected (401)", wrongOtp.status === 401);
 
-    // rider can rotate the OTP while waiting (pre-start only)
+    // 3-strike lock: two more wrong tries exhaust the budget, the next is locked
+    await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
+    const thirdWrong = await api(`/v1/trips/${tripId}/start`, { otp: "111111" }, riderToken);
+    check("third wrong OTP still 401", thirdWrong.status === 401);
+    const lockedStart = await api(`/v1/trips/${tripId}/start`, { otp: "222222" }, riderToken);
+    check("fourth attempt locked out (409 OTP_LOCKED)", lockedStart.status === 409 && lockedStart.json.code === "OTP_LOCKED");
+    const attemptsView = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    check("trip view exposes attempts exhausted", attemptsView.json.otpAttemptsLeft === 0 && typeof attemptsView.json.otpExpiresAt === "string");
+
+    // rider can rotate the OTP while waiting (pre-start only) — resets lock + window
     const regen = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);
     check("rider can regenerate start OTP pre-start", regen.status === 200 && typeof regen.json.otp === "string");
     const started = await api(`/v1/trips/${tripId}/start`, { otp: regen.json.otp ?? otp }, riderToken);

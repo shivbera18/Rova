@@ -353,6 +353,7 @@ export async function startServer(listenPort = PORT): Promise<{
     await validateRideRequest(sql, sess.userId, {
       offerPaise: body.offerPaise,
       platformFeePaise: body.platformFeePaise,
+      paymentMethod: body.paymentMethod,
       pickup: body.pickup,
       drop: body.drop,
     });

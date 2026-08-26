@@ -121,6 +121,9 @@ export interface TripView {
   myRatingStars?: number;
   /** start-code window for pre-start trips */
   otpExpiresAt?: string;
+  otpExpiresInMs?: number;
+  otpAttemptsLeft?: number;
+  otpAttemptsMax?: number;
   paymentMethod?: "WALLET" | "UPI" | "CASH";
   startedAt?: string;
   endedAt?: string;
@@ -208,7 +211,13 @@ export function cancelMatchedTrip(tripId: string): Promise<{ state: string; dupl
   return api(`/v1/trips/${tripId}/cancel-rider`, { body: {} });
 }
 
-export function regenerateTripOtp(tripId: string): Promise<{ otp: string }> {
+export function regenerateTripOtp(tripId: string): Promise<{
+  otp: string;
+  otpExpiresAt: string;
+  otpExpiresInMs: number;
+  otpAttemptsLeft: number;
+  otpAttemptsMax: number;
+}> {
   return api(`/v1/trips/${tripId}/regenerate-otp`, { body: {} });
 }
 export interface TripListResponse {

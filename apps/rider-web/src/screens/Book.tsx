@@ -54,25 +54,80 @@ type Phase =
 
 const ACTIVE_TRIP_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED", "ONGOING"];
 
-/** Ticks the start-code window so riders know when to regenerate. */
-function OtpExpiryHint({ expiresAt }: { expiresAt: string }): React.ReactElement {
-  const [text, setText] = useState<string>("");
+/** Start-code block: shows the digits only while they can actually be used. */
+function StartCodeBlock({
+  otp,
+  expiresInMs,
+  attemptsLeft,
+  onRegenerate,
+}: {
+  otp: string;
+  expiresInMs?: number;
+  attemptsLeft?: number;
+  onRegenerate: () => void;
+}): React.ReactElement {
+  const [remaining, setRemaining] = useState<number | null>(expiresInMs ?? null);
   useEffect(() => {
+    if (expiresInMs == null) {
+      setRemaining(null);
+      return;
+    }
+    const deadline = performance.now() + expiresInMs;
+    let iv: ReturnType<typeof setInterval> | null = null;
     const tick = (): void => {
-      const ms = new Date(expiresAt).getTime() - Date.now();
-      setText(
-        ms <= 0
-          ? "Expired — tap “Show new start code”"
-          : `Valid for ${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`,
-      );
+      const ms = Math.max(0, deadline - performance.now());
+      setRemaining(ms);
+      if (ms === 0 && iv) clearInterval(iv);
     };
     tick();
-    const iv = setInterval(tick, 1000);
-    return () => clearInterval(iv);
-  }, [expiresAt]);
+    iv = setInterval(tick, 1000);
+    return () => {
+      if (iv) clearInterval(iv);
+    };
+  }, [expiresInMs]);
+
+  const expired = remaining != null && remaining <= 0;
+  const locked = attemptsLeft === 0;
+
+  // A stale code that the server will always reject must not stay on screen —
+  // people read the digits, not the caveat underneath them.
+  if (expired || locked) {
+    return (
+      <div className="otp-display" style={{ borderColor: "#b91c1c" }}>
+        <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "#b91c1c" }}>
+          <KeyRound size={12} /> {locked ? "Code locked" : "Code expired"}
+        </div>
+        <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "6px 0 8px" }}>
+          {locked
+            ? "Three wrong tries were entered. Generate a new code for your driver."
+            : "Your start code timed out. Generate a new one for your driver."}
+        </p>
+        <NeoButton variant="primary" size="sm" onClick={onRegenerate}>
+          <RefreshCw size={14} /> Show new start code
+        </NeoButton>
+      </div>
+    );
+  }
+
+  const mmss =
+    remaining == null
+      ? null
+      : `${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}`;
+
   return (
-    <div style={{ fontSize: 10.5, fontWeight: 800, color: text.startsWith("Expired") ? "#b91c1c" : "var(--ink-muted)" }}>
-      {text}
+    <div className="otp-display">
+      <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
+        <KeyRound size={12} /> Start OTP for Driver
+      </div>
+      <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
+        {otp}
+      </div>
+      {mmss && (
+        <div aria-hidden style={{ fontSize: 10.5, fontWeight: 800, color: "var(--ink-muted)" }}>
+          Valid for {mmss}
+          {attemptsLeft != null ? ` · ${attemptsLeft} tries left` : ""}
+        </div>
+      )}
     </div>
   );
 }
@@ -474,8 +529,22 @@ export default function Book(): React.ReactElement {
   async function handleRegenerateOtp(): Promise<void> {
     if (phase.k !== "trip") return;
     try {
-      const { otp } = await regenerateTripOtp(phase.trip.id);
-      setPhase((p) => (p.k === "trip" ? { ...p, trip: { ...p.trip, otp } } : p));
+      const fresh = await regenerateTripOtp(phase.trip.id);
+      setPhase((p) =>
+        p.k === "trip"
+          ? {
+              ...p,
+              trip: {
+                ...p.trip,
+                otp: fresh.otp,
+                otpExpiresAt: fresh.otpExpiresAt,
+                otpExpiresInMs: fresh.otpExpiresInMs,
+                otpAttemptsLeft: fresh.otpAttemptsLeft,
+                otpAttemptsMax: fresh.otpAttemptsMax,
+              },
+            }
+          : p,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate a new code");
     }
@@ -890,17 +959,12 @@ export default function Book(): React.ReactElement {
             )}
 
             {phase.trip.otp && (
-              <div className="otp-display">
-                <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
-                  <KeyRound size={12} /> Start OTP for Driver
-                </div>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
-                  {phase.trip.otp}
-                </div>
-                {phase.trip.otpExpiresAt && (
-                  <OtpExpiryHint expiresAt={phase.trip.otpExpiresAt} />
-                )}
-              </div>
+              <StartCodeBlock
+                otp={phase.trip.otp}
+                expiresInMs={phase.trip.otpExpiresInMs}
+                attemptsLeft={phase.trip.otpAttemptsLeft}
+                onRegenerate={() => void handleRegenerateOtp()}
+              />
             )}
 
             {PRE_START_STATES.includes(phase.trip.state) && (

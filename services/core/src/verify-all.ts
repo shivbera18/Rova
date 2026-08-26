@@ -6,17 +6,21 @@
  * 4. Dispatch & Matching (haversine ring expansion, vehicle class matching, atomic race claim)
  * 5. Trip Lifecycle & Security (OTP hashing, attempt locks, state progression)
  * 6. Double-Entry Accounting Ledger (balance invariant, cash vs digital settlement, tip routing)
- * 7. End-to-End Multi-Party Scenarios:
+* 7. End-to-End Multi-Party Scenarios:
  *    - Scenario A: List-price instant dispatch & driver accept
- *    - Scenario B: Negotiated booking (zero offer ₹0) with driver accept
- *    - Scenario C: Negotiated booking with driver counter → rider accept
- *    - Scenario D: Negotiated booking with driver counter → rider final offer → driver accept
- *    - Scenario E: Driver counter → rider decline
+ *    - Scenario B: Negotiated booking (zero offer Rs0) with driver accept
+ *    - Scenario C: Negotiated booking with driver counter -> rider accept
+ *    - Scenario D: Negotiated booking with driver counter -> rider final offer -> driver accept
+ *    - Scenario E: Driver counter -> rider decline
  *    - Scenario F: Rider cancel pre-agreement
  *    - Scenario G: Driver cancel post-assignment
  *    - Scenario H: OTP start failure (invalid code rejection + correct code start)
  *    - Scenario I: Cash ride settlement (cash receivable + digital fee)
  *    - Scenario J: Ratings & duplicate rating rejection
+ *    - Scenario K: Immutable single-vehicle driver registration
+ *    - Scenario L: Wallet top-up & booking guard
+ *    - Scenario M: Matched rider cancellation
+ *    - Scenario N: Favourite drivers + direct-to-driver dispatch
  */
 process.env.NO_AUTO_START = "1";
 import WebSocket from "ws";
@@ -25,6 +29,7 @@ import { issueQuoteToken, verifyQuoteToken, quoteFromCard } from "./pricing.ts";
 import { hashOtp } from "./trips.ts";
 import { settlementLines } from "./ledger.ts";
 import { startServer } from "./server.ts";
+import { issueToken, upsertUser } from "./auth.ts";
 import { seedData } from "./db/seed.ts";
 import type { FareCardRow } from "./db/rows.ts";
 
@@ -122,28 +127,28 @@ async function runVerification(): Promise<void> {
   // =========================================================================
   console.log("--- 1. Money & Fee Model Verification ---");
   {
-    // Normal fee calculation: 10% fee on ₹86 with min ₹5 (500 paise) and cap ₹40 (4000 paise)
+    // Normal fee calculation: 10% fee on â‚¹86 with min â‚¹5 (500 paise) and cap â‚¹40 (4000 paise)
     const normalFee = platformFee(paisa(8600), 0.10, paisa(500), paisa(4000));
-    assert(normalFee === 860, "10% platform fee on ₹86 is ₹8.60 (860 paise)");
+    assert(normalFee === 860, "10% platform fee on â‚¹86 is â‚¹8.60 (860 paise)");
 
     // Clamping to minimum
     const minFee = platformFee(paisa(2000), 0.10, paisa(500), paisa(4000));
-    assert(minFee === 500, "10% platform fee on ₹20 is clamped up to min ₹5 (500 paise)");
+    assert(minFee === 500, "10% platform fee on â‚¹20 is clamped up to min â‚¹5 (500 paise)");
 
     // Clamping to cap
     const capFee = platformFee(paisa(80000), 0.10, paisa(500), paisa(4000));
-    assert(capFee === 4000, "10% platform fee on ₹800 is clamped down to cap ₹40 (4000 paise)");
+    assert(capFee === 4000, "10% platform fee on â‚¹800 is clamped down to cap â‚¹40 (4000 paise)");
 
-    // Zero-offer fee: even if rider negotiates to ₹0, the minimum platform fee is retained
+    // Zero-offer fee: even if rider negotiates to â‚¹0, the minimum platform fee is retained
     const zeroFee = platformFee(paisa(0), 0.10, paisa(500), paisa(4000));
-    assert(zeroFee === 500, "₹0 offer retains minimum platform fee of ₹5 (500 paise)");
+    assert(zeroFee === 500, "â‚¹0 offer retains minimum platform fee of â‚¹5 (500 paise)");
 
     // Negotiated breakdown: driver gets 100% of their offer, platform fee is charged on rider side
     const mockList = { listPrice: paisa(8600), tripFare: paisa(7600), platformFee: paisa(1000), surgeMultiplier: 1 };
     const breakdown = negotiatedQuote(paisa(6000), mockList);
-    assert(breakdown.driverTakeHome === 6000, "Driver take-home exactly equals the agreed ₹60 offer");
+    assert(breakdown.driverTakeHome === 6000, "Driver take-home exactly equals the agreed â‚¹60 offer");
     assert(breakdown.platformFee === 1000, "Platform fee is charged separately on top");
-    assert(breakdown.riderTotal === 7000, "Rider total is offer + platform fee (₹70)");
+    assert(breakdown.riderTotal === 7000, "Rider total is offer + platform fee (â‚¹70)");
   }
 
   // =========================================================================
@@ -349,7 +354,7 @@ async function runVerification(): Promise<void> {
     const assignedWaiter = riderWs.waitFor((m) => m.t === "driver.assigned");
 
     const riderOffer = Math.round(bikeQuote.listPrice * 0.5);
-    const platformContribution = 125; // ₹1.25, independently negotiated from driver pay
+    const platformContribution = 125; // â‚¹1.25, independently negotiated from driver pay
     const reqRes = await api("/v1/requests", {
       quoteToken: bikeQuote.quoteToken,
       offerPaise: riderOffer,
@@ -366,7 +371,7 @@ async function runVerification(): Promise<void> {
     const offer = await offerWaiter;
     assert(offer.offer.takeHomePaise === riderOffer, "Driver receives rider offer as pure take-home pay");
 
-    // Driver counters +₹15
+    // Driver counters +â‚¹15
     const driverCounterAsk = riderOffer + 1500;
     const counterRes = await api(`/v1/negotiations/${reqRes.json.negotiationId}/counter`, { paise: driverCounterAsk }, driverToken);
     assert(counterRes.status === 200 && counterRes.json.state === "COUNTERED_DRIVER", "Driver counter submitted successfully");
@@ -658,6 +663,140 @@ async function runVerification(): Promise<void> {
 
     const checkExp = await api(`/v1/requests/${reqRes.json.sessionId}`, undefined, riderToken);
     assert(checkExp.json.state === "EXPIRED", "Background sweeper transitioned expired negotiation to EXPIRED");
+  }
+
+  // --- Scenario K: Favourite Drivers + Direct-to-Director Requests ---
+  console.log("\n  [Scenario N] Ride Again With Driver (direct dispatch)");
+  {
+    const driverId = driverAuth.json.userId as string;
+
+    // favourite toggle + list (PUT/DELETE need raw fetch — api() always POSTs)
+    async function favFetch(driver: string, method: "PUT" | "DELETE"): Promise<{ status: number; json: any }> {
+      const res = await fetch(`${BASE}/v1/drivers/${driver}/favorite`, {
+        method,
+        headers: { "content-type": "application/json", authorization: `Bearer ${riderToken}` },
+        body: method === "PUT" ? "{}" : undefined,
+      });
+      return { status: res.status, json: await res.json().catch(() => ({})) };
+    }
+    const fav = await favFetch(driverId, "PUT");
+    assert(fav.status === 200 && fav.json.ok === true, "Rider can favourite a driver", `${fav.status} ${JSON.stringify(fav.json)}`);
+    const dupFav = await favFetch(driverId, "PUT");
+    assert(dupFav.status === 200 && dupFav.json.duplicate === true, "Double-favourite is idempotent");
+    const listRes = await api("/v1/rider/favorites", undefined, riderToken);
+    assert(
+      listRes.status === 200 &&
+        listRes.json.favorites.some((f: any) => f.id === driverId && f.vehicleClass === "BIKE"),
+      "Favourites list returns the saved driver with profile data",
+    );
+
+    // second live BIKE rider-context: a rival who must NOT receive direct requests.
+    // Created via domain helpers — HTTP auth would trip the otp-ip rate limiter
+    // this late in the suite.
+    const rivalUser = await upsertUser(serverHandle!.storage.sql, "+919900000903", "DRIVER", "Rival Biker");
+    const rivalToken = await issueToken(rivalUser.id, "DRIVER");
+    await serverHandle?.storage.sql.query(
+      `INSERT INTO driver_profiles (user_id, vehicle_class, plate, kyc_status, online)
+       VALUES ($1, 'BIKE', 'KA01DIRECT', 'APPROVED', false)
+       ON CONFLICT (user_id) DO UPDATE SET kyc_status='APPROVED', vehicle_class='BIKE'`,
+      [rivalUser.id],
+    );
+    const rivalTicket = await api("/v1/ws/ticket", {}, rivalToken);
+    const rivalWs = await WsClient.connect(`${WS_BASE}/ws/driver?ticket=${rivalTicket.json.ticket}`);
+    rivalWs.send({ t: "pos.update", lat: pickup.lat, lng: pickup.lng });
+    await new Promise((r) => setTimeout(r, 400));
+
+    // targeted LIST request: exactly one delivery even with two eligible drivers
+    const quotesRes = await api("/v1/quotes", { pickup, drop }, riderToken);
+    const bikeQuote = quotesRes.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+    const targetWaiter = driverWs.waitFor((m) => m.t === "dispatch.offer");
+    const reqRes = await api("/v1/requests", {
+      quoteToken: bikeQuote.quoteToken,
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+      driverId,
+    }, riderToken);
+    assert(reqRes.status === 200, "Direct-to-driver request created");
+    assert(reqRes.json.deliveredToDrivers === 1, "Direct request delivered to exactly one driver");
+    const targetOffer = await targetWaiter;
+    assert(targetOffer.offer.requestId === reqRes.json.sessionId, "Target driver received the direct offer");
+    // waitFor rejects on timeout â€” a timeout here is exactly what we want
+    const rivalLeak = await rivalWs
+      .waitFor((m: any) => m.t === "dispatch.offer" && m.offer.requestId === reqRes.json.sessionId, 1500)
+      .then(() => true)
+      .catch(() => false);
+    assert(rivalLeak === false, "Rival BIKE driver did not receive the direct offer");
+
+    // offline target fails fast instead of timing out
+    const ghostUser = await upsertUser(serverHandle!.storage.sql, "+919900000904", "DRIVER", "Ghost Biker");
+    const ghostProfile = await serverHandle?.storage.sql.query(
+      `INSERT INTO driver_profiles (user_id, vehicle_class, plate, kyc_status, online)
+       VALUES ($1, 'BIKE', 'KA01GHOST9', 'APPROVED', false)
+       ON CONFLICT (user_id) DO UPDATE SET kyc_status='APPROVED', vehicle_class='BIKE'
+       RETURNING user_id`,
+      [ghostUser.id],
+    );
+    assert((ghostProfile?.rowCount ?? 0) === 1 || (ghostProfile?.rows.length ?? 0) === 1, "Offline rival driver seeded");
+
+    const quotes2 = await api("/v1/quotes", { pickup, drop }, riderToken);
+    const bike2b = quotes2.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+
+    // non-favourited drivers cannot be targeted directly
+    const notFav = await api("/v1/requests", {
+      quoteToken: bike2b.quoteToken,
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+      driverId: rivalUser.id,
+    }, riderToken);
+    assert(notFav.status === 403 && notFav.json.code === "NOT_A_FAVOURITE", "Direct requests require a saved favourite");
+
+    await favFetch(ghostUser.id, "PUT");
+    const offlineRes = await api("/v1/requests", {
+      quoteToken: bike2b.quoteToken,
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+      driverId: ghostUser.id,
+    }, riderToken);
+    assert(offlineRes.status === 409 && offlineRes.json.code === "DRIVER_UNAVAILABLE", "Offline favourite rejected fast with DRIVER_UNAVAILABLE");
+
+    // negotiated direct request: targeting must survive counter/final re-fanouts
+    const nq = await api("/v1/quotes", { pickup, drop }, riderToken);
+    const nBike = nq.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+    const riderCounterWaiter = riderWs.waitFor((m) => m.t === "negotiation.counter");
+    const nReq = await api("/v1/requests", {
+      quoteToken: nBike.quoteToken,
+      offerPaise: Math.round(nBike.listPrice * 0.6),
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+      driverId,
+    }, riderToken);
+    assert(nReq.status === 200 && nReq.json.mode === "NEGOTIATED", "Negotiated direct request created");
+    assert(nReq.json.deliveredToDrivers === 1, "Direct negotiation delivered to exactly one driver");
+
+    await api(`/v1/negotiations/${nReq.json.negotiationId}/counter`, { paise: Math.round(nBike.listPrice * 0.75) }, driverToken);
+    await riderCounterWaiter;
+    // rider final BELOW the counter -> COUNTERED_RIDER state -> rebroadcast
+    const finalRes = await api(`/v1/negotiations/${nReq.json.negotiationId}/final`, { paise: Math.round(nBike.listPrice * 0.65), platformFeePaise: 125 }, riderToken);
+    assert(finalRes.status === 200 && finalRes.json.state === "COUNTERED_RIDER", "Rider final offer recorded for direct negotiation");
+    const rivalLeak2 = await rivalWs
+      .waitFor((m: any) => m.t === "dispatch.offer" && m.offer.requestId === nReq.json.sessionId, 1500)
+      .then(() => true)
+      .catch(() => false);
+    assert(rivalLeak2 === false, "Rival driver did not receive the targeted re-fanout");
+
+    // cleanup: unfavourite + close rival socket
+    await favFetch(driverId, "DELETE").catch(() => undefined);
+    await api(`/v1/requests/${nReq.json.sessionId}/cancel`, {}, riderToken).catch(() => undefined);
+    await api(`/v1/requests/${reqRes.json.sessionId}/cancel`, {}, riderToken).catch(() => undefined);
+    rivalWs.close();
   }
 
   riderWs.close();

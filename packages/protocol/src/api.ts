@@ -42,6 +42,8 @@ export interface CreateRequest {
   paymentMethod: PaymentMethod;
   pickupLabel?: string;     // human-readable place names shown to drivers
   dropLabel?: string;
+  /** favourite driver for direct-to-driver ("ride again") requests */
+  driverId?: string;
 }
 
 export interface RequestSession {
@@ -76,6 +78,8 @@ export interface DriverOfferPayload {
   drop: LatLon;
   pickupLabel?: string;
   dropLabel?: string;
+  /** direct-to-driver ("ride again") request — show a repeat-rider badge */
+  isRepeatRequest?: boolean;
   paymentMethod: PaymentMethod;
 }
 

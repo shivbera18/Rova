@@ -347,6 +347,7 @@ export async function startServer(listenPort = PORT): Promise<{
       drop?: LatLon;
       pickupLabel?: string;
       dropLabel?: string;
+      driverId?: string;
     };
     const payload = body.quoteToken ? verifyQuoteToken(body.quoteToken) : null;
     if (!payload || !body.vehicleClass || !body.paymentMethod || !body.pickup || !body.drop) {
@@ -356,6 +357,38 @@ export async function startServer(listenPort = PORT): Promise<{
       typeof s === "string"
         ? s.replace(/[\u0000-\u001f\u007f\u00ad]/g, "").trim().slice(0, 200) || null
         : null;
+    // Direct-to-driver ("ride again") requests skip the open auction.
+    let requestedDriverId: string | null = null;
+    if (body.driverId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.driverId)) {
+        fail(400, "BAD_BODY", "bad driverId");
+      }
+      // Direct dispatch is a favourites-only feature — arbitrary driver
+      // targeting would let riders spam any specific driver with pushes.
+      const favourited = await sql.query(
+        "SELECT 1 FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2",
+        [sess.userId, body.driverId],
+      );
+      if (favourited.rows.length === 0) {
+        fail(403, "NOT_A_FAVOURITE", "save this driver to request them directly");
+      }
+      enforceRateLimit(`direct:${sess.userId}:${body.driverId}`, 3, 10 * 60_000);
+      const prof = (
+        await sql.query<{ kyc_status: string; vehicle_class: string }>(
+          "SELECT kyc_status, vehicle_class FROM driver_profiles WHERE user_id=$1",
+          [body.driverId],
+        )
+      ).rows[0];
+      if (!prof || prof.kyc_status !== "APPROVED") fail(404, "DRIVER_UNAVAILABLE", "driver is not available");
+      if (prof.vehicle_class !== body.vehicleClass!) {
+        fail(400, "CLASS_MISMATCH", "favourite driver drives a different vehicle class");
+      }
+      const live = getLiveDriver(body.driverId);
+      if (!live || !live.online || live.onTrip) {
+        fail(409, "DRIVER_UNAVAILABLE", "favourite driver is offline right now");
+      }
+      requestedDriverId = body.driverId;
+    }
     const negotiated = typeof body.offerPaise === "number";
     const platformContribution = negotiated ? (body.platformFeePaise ?? payload.pf) : payload.pf;
     if (negotiated && (!Number.isSafeInteger(body.offerPaise) || body.offerPaise! < 0)) {
@@ -390,8 +423,8 @@ export async function startServer(listenPort = PORT): Promise<{
       `INSERT INTO ride_requests
          (id, rider_id, city_id, vehicle_class, mode, state, payment_method,
           pickup_lat, pickup_lng, drop_lat, drop_lng, list_price, platform_fee,
-          pickup_label, drop_label)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          pickup_label, drop_label, requested_driver_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
         requestId,
         sess.userId,
@@ -408,6 +441,7 @@ export async function startServer(listenPort = PORT): Promise<{
         platformContribution,
         clean(body.pickupLabel),
         clean(body.dropLabel),
+        requestedDriverId,
       ],
     );
 
@@ -443,6 +477,7 @@ export async function startServer(listenPort = PORT): Promise<{
       drop: body.drop!,
       pickupLabel: clean(body.pickupLabel),
       dropLabel: clean(body.dropLabel),
+      onlyDriverId: requestedDriverId,
       expiresAt: expiresAt.toISOString(),
       round: 1,
       isCounter: false,
@@ -474,6 +509,7 @@ export async function startServer(listenPort = PORT): Promise<{
     drop: LatLon;
     pickupLabel?: string | null;
     dropLabel?: string | null;
+    onlyDriverId?: string | null;
     expiresAt: string;
     round: number;
     isCounter: boolean;
@@ -499,6 +535,7 @@ export async function startServer(listenPort = PORT): Promise<{
       drop: o.drop,
       pickupLabel: o.pickupLabel ?? null,
       dropLabel: o.dropLabel ?? null,
+      onlyDriverId: o.onlyDriverId ?? null,
       tripKm: km,
       expiresAt: o.expiresAt,
       round: o.round,
@@ -700,8 +737,9 @@ export async function startServer(listenPort = PORT): Promise<{
           payment_method: string;
           pickup_label: string | null;
           drop_label: string | null;
+          requested_driver_id: string | null;
         }>(
-          "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng, payment_method, pickup_label, drop_label FROM ride_requests WHERE id=$1",
+          "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng, payment_method, pickup_label, drop_label, requested_driver_id FROM ride_requests WHERE id=$1",
           [updated.request_id],
         )
       ).rows[0]!;
@@ -713,6 +751,7 @@ export async function startServer(listenPort = PORT): Promise<{
         drop: { lat: rr.drop_lat, lng: rr.drop_lng },
         pickupLabel: rr.pickup_label,
         dropLabel: rr.drop_label,
+        onlyDriverId: rr.requested_driver_id,
         expiresAt: new Date(updated.expires_at).toISOString(),
         round: updated.round,
         isCounter: true,
@@ -1035,6 +1074,68 @@ export async function startServer(listenPort = PORT): Promise<{
       }
     });
     return { ok: true, contacts: parsed };
+  });
+
+  app.get("/v1/rider/favorites", async (req) => {
+    const sess = requireRider(await session(req));
+    const rows = await sql.query<{
+      id: string;
+      name: string;
+      vehicleClass: string | null;
+      plate: string | null;
+      rating: number | null;
+    }>(
+      `SELECT f.driver_id AS id, u.full_name AS name,
+              d.vehicle_class AS "vehicleClass", d.plate, u.rating_rolling AS rating
+       FROM favorite_drivers f
+       JOIN users u ON u.id = f.driver_id
+       LEFT JOIN driver_profiles d ON d.user_id = f.driver_id
+       WHERE f.rider_id=$1
+       ORDER BY f.created_at DESC
+       LIMIT 10`,
+      [sess.userId],
+    );
+    return {
+      favorites: rows.rows.map((r) => ({ ...r, rating: Number(r.rating ?? 5) })),
+    };
+  });
+
+  app.put("/v1/drivers/:id/favorite", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    enforceRateLimit(`fav:${sess.userId}`, 30, 60_000);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      fail(400, "BAD_BODY", "driver id required");
+    }
+    if (id === sess.userId) fail(400, "BAD_BODY", "cannot favourite yourself");
+    const target = await sql.query<{ role: string }>("SELECT role FROM users WHERE id=$1", [id]);
+    if (target.rows[0]?.role !== "DRIVER") fail(404, "NOT_FOUND", "no such driver");
+    // Single conditional insert: the cap is enforced atomically with the write,
+    // so concurrent favourites for different drivers cannot exceed ten.
+    const ins = await sql.query(
+      `INSERT INTO favorite_drivers (rider_id, driver_id)
+       SELECT $1, $2
+       WHERE (SELECT COUNT(*) FROM favorite_drivers WHERE rider_id=$1) < 10
+       ON CONFLICT DO NOTHING`,
+      [sess.userId, id],
+    );
+    if (ins.rows.length === 0) {
+      const now = await sql.query(
+        "SELECT 1 FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2",
+        [sess.userId, id],
+      );
+      if (now.rows.length === 0) fail(409, "FAVORITE_LIMIT", "up to 10 favourite drivers");
+      return { ok: true, duplicate: true };
+    }
+    return { ok: true };
+  });
+
+  app.delete("/v1/drivers/:id/favorite", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    enforceRateLimit(`fav:${sess.userId}`, 30, 60_000);
+    await sql.query("DELETE FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2", [sess.userId, id]);
+    return { ok: true };
   });
 
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {

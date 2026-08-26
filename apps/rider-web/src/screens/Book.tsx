@@ -7,6 +7,7 @@ import {
   Banknote,
   CircleCheck,
   Clock,
+  Heart,
   KeyRound,
   LocateFixed,
   Radar,
@@ -29,12 +30,14 @@ import {
   ApiError,
   cancelMatchedTrip,
   cancelRequest,
+  getFavorites,
   getTrip,
   getToken,
   getWallet,
   listTrips,
   rateTrip,
   regenerateTripOtp,
+  toggleFavorite,
   topUpWallet,
   type Quote,
   type RequestSessionView,
@@ -50,6 +53,50 @@ type Phase =
   | { k: "done"; trip: TripView };
 
 const ACTIVE_TRIP_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED", "ONGOING"];
+
+/** One-tap "save this driver" — idempotent server-side, safe to tap twice. */
+function SaveDriverButton({
+  driverId,
+  driverName,
+  onError,
+  onSaved,
+}: {
+  driverId: string;
+  driverName: string;
+  onError: (msg: string) => void;
+  onSaved?: () => void;
+}): React.ReactElement {
+  const [saved, setSaved] = useState(false);
+  const first = (driverName || "Driver").split(" ")[0] || "Driver";
+  return saved ? (
+    <div className="ok-text">
+      <CircleCheck size={14} /> {first} saved — find them under “Ride again”
+    </div>
+  ) : (
+    <NeoButton
+      variant="white"
+      size="sm"
+      onClick={() => {
+        void toggleFavorite(driverId, true)
+          .then(() => {
+            setSaved(true);
+            onSaved?.();
+          })
+          .catch(() => onError("Could not save driver"));
+      }}
+    >
+      <Heart size={14} /> Save {first} for next time
+    </NeoButton>
+  );
+}
+
+interface FavoriteDriver {
+  id: string;
+  name: string;
+  vehicleClass: string | null;
+  plate: string | null;
+  rating: number;
+}
 
 interface StoredRoute {
   id: string;
@@ -151,6 +198,8 @@ export default function Book(): React.ReactElement {
   const [tipPaise, setTipPaise] = useState(0);
   const [tipDone, setTipDone] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [favorites, setFavorites] = useState<FavoriteDriver[]>([]);
+  const [favDriver, setFavDriver] = useState<FavoriteDriver | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
 
@@ -162,6 +211,13 @@ export default function Book(): React.ReactElement {
   useEffect(() => {
     void getWallet()
       .then((w) => setWalletBalance(w.balancePaise))
+      .catch(() => undefined);
+  }, []);
+
+  // Favourite drivers power one-tap "ride again" direct requests.
+  useEffect(() => {
+    void getFavorites()
+      .then((res) => setFavorites(res.favorites))
       .catch(() => undefined);
   }, []);
 
@@ -435,6 +491,7 @@ export default function Book(): React.ReactElement {
     setPickupLabel("");
     setDrop(null);
     setDropLabel("");
+    setFavDriver(null);
     setError(null);
     setPhase({ k: "pick" });
   }
@@ -558,6 +615,27 @@ export default function Book(): React.ReactElement {
               <LocateFixed size={15} /> Use my current location
             </button>
 
+            {favorites.length > 0 && (
+              <>
+                <div className="booking-divider"><span>RIDE AGAIN</span></div>
+                <div className="quick-places-row" role="radiogroup" aria-label="Favourite drivers">
+                  {favorites.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={favDriver?.id === f.id}
+                      className={`saved-route ${favDriver?.id === f.id ? "selected" : ""}`}
+                      onClick={() => setFavDriver((cur) => (cur?.id === f.id ? null : f))}
+                    >
+                      <Heart size={14} fill={favDriver?.id === f.id ? "currentColor" : "none"} />
+                      <small>{`${(f.name || "Driver").split(" ")[0] || "Driver"} · ${vehicleLabel(f.vehicleClass ?? "BIKE")}`}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
             <div className="booking-divider"><span>POPULAR ROUTES</span></div>
             <div className="quick-places-row">
               {POPULAR_ROUTES.map((r) => (
@@ -676,6 +754,7 @@ export default function Book(): React.ReactElement {
             drop={drop}
             pickupLabel={pickupLabel}
             dropLabel={dropLabel}
+            favoriteDriverId={favDriver?.id ?? null}
             payMethod={payMethod}
             walletBalance={walletBalance}
             onClose={() => setPhase({ k: "quotes", quotes: [phase.quote] })}
@@ -866,6 +945,20 @@ export default function Book(): React.ReactElement {
 
             {/* Receipt — printable via the browser's Save-as-PDF */}
             <div className="booking-divider"><span>RECEIPT</span></div>
+            {phase.trip.driverId && phase.trip.state === "COMPLETED" && (
+              <div style={{ marginBottom: 12 }}>
+                <SaveDriverButton
+                  driverId={phase.trip.driverId}
+                  driverName={phase.trip.driverName ?? "this driver"}
+                  onError={setError}
+                  onSaved={() => {
+                    void getFavorites()
+                      .then((res) => setFavorites(res.favorites))
+                      .catch(() => undefined);
+                  }}
+                />
+              </div>
+            )}
             <div className="print-area" style={{ fontSize: 12.5 }}>
               <div className="spread" style={{ marginBottom: 6 }}>
                 <strong style={{ fontFamily: "var(--font-display)" }}>Chalo-X Ride Invoice</strong>

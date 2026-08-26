@@ -70,6 +70,8 @@ export interface RequestSessionView {
   mode: "LIST" | "NEGOTIATED";
   state: "MATCHING" | "NEGOTIATING" | "AGREED" | "EXPIRED" | "DECLINED" | "CANCELLED";
   negotiationId?: string;
+  /** direct-to-driver requests: how many drivers actually received it (0/1) */
+  deliveredToDrivers?: number;
   currentOfferPaise?: number;
   platformFeePaise?: number;
   riderTotalPaise?: number;
@@ -141,6 +143,24 @@ export function getContacts(): Promise<{ contacts: Array<{ name: string; phone: 
 
 export function saveContacts(contacts: { contacts: Array<{ name?: string; phone?: string }> }): Promise<{ ok: true }> {
   return api("/v1/safety/contacts", { method: "PUT", body: contacts });
+}
+
+// ---- favourite drivers ("ride again") ------------------------------------------
+
+export interface FavoriteDriver {
+  id: string;
+  name: string;
+  vehicleClass: string | null;
+  plate: string | null;
+  rating: number;
+}
+
+export function getFavorites(): Promise<{ favorites: FavoriteDriver[] }> {
+  return api("/v1/rider/favorites");
+}
+
+export function toggleFavorite(driverId: string, on: boolean): Promise<{ ok: true }> {
+  return api(`/v1/drivers/${driverId}/favorite`, { method: on ? "PUT" : "DELETE", body: {} });
 }
 
 // ---- negotiation (rider side) ------------------------------------------------

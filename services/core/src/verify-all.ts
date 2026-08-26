@@ -565,6 +565,39 @@ async function runVerification(): Promise<void> {
 
     const dupRateRes = await api(`/v1/trips/${tripId}/rate`, { stars: 4 }, riderToken);
     assert(dupRateRes.status === 409, "Duplicate rating on same trip is properly rejected (HTTP 409)");
+
+    // driver rates the rider back — bidirectional ratings
+    const driverRateRes = await api(`/v1/trips/${tripId}/rate`, { stars: 4, comment: "Polite rider" }, driverToken);
+    assert(driverRateRes.status === 200 && driverRateRes.json.ok === true, "Driver submitted 4-star rating of the rider");
+    const driverDup = await api(`/v1/trips/${tripId}/rate`, { stars: 5 }, driverToken);
+    assert(driverDup.status === 409, "Duplicate driver-side rating rejected (HTTP 409)");
+
+    // rolling averages reflect both directions
+    const driverAvg = await serverHandle?.storage.sql.query<{ r: string }>(
+      "SELECT rating_rolling::text AS r FROM users WHERE id=(SELECT driver_id FROM trips WHERE id=$1)",
+      [tripId],
+    );
+    assert(Number(driverAvg?.rows[0]?.r) === 5, "Driver rolling rating updated from rider's 5-star");
+    const riderIdRow = await serverHandle?.storage.sql.query<{ rider_id: string }>(
+      "SELECT rider_id FROM trips WHERE id=$1",
+      [tripId],
+    );
+    const riderAvg = await serverHandle?.storage.sql.query<{ r: string }>(
+      "SELECT rating_rolling::text AS r FROM users WHERE id=$1",
+      [riderIdRow?.rows[0]?.rider_id],
+    );
+    assert(Number(riderAvg?.rows[0]?.r) === 4, "Rider rolling rating updated from driver's 4-star");
+
+    // trip view reports the caller's own rating so consoles can't double-submit
+    const riderView = await api(`/v1/trips/${tripId}`, undefined, riderToken);
+    assert(riderView.json.myRatingStars === 5 && !!riderView.json.driverName, "Trip view exposes myRatingStars and counterpart names to the rider");
+    const driverView = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    assert(driverView.json.myRatingStars === 4 && !!driverView.json.riderName, "Trip view exposes myRatingStars and rider name to the driver");
+
+    // non-members still cannot rate or read
+    const outsider = await api("/v1/auth/otp/verify", { phone: "+919900000906", otp: "123456", role: "RIDER" });
+    const outsiderRate = await api(`/v1/trips/${tripId}/rate`, { stars: 1 }, outsider.json.token);
+    assert(outsiderRate.status === 403 && outsiderRate.json.code === "FORBIDDEN", "Non-member cannot rate a stranger's trip");
   }
   console.log("\n  [Scenario H] Driver Profile & Wallet Accounting");
   {

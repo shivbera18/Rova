@@ -998,7 +998,15 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = requireAuth(await session(req));
     const body = req.body as { contacts?: Array<{ name?: string; phone?: string }> };
     const list = Array.isArray(body.contacts) ? body.contacts.slice(0, 3) : [];
-    const cleanName = (s: unknown): string => String(s ?? "").replace(/[ -­]/g, "").trim().slice(0, 80);
+    const cleanName = (s: unknown): string =>
+      Array.from(String(s ?? ""))
+        .filter((ch) => {
+          const cp = ch.codePointAt(0) ?? 0;
+          return cp > 31 && cp !== 127 && cp !== 173;
+        })
+        .join("")
+        .trim()
+        .slice(0, 80);
     const parsed: Array<{ name: string; phone: string }> = [];
     for (const c of list) {
       const name = cleanName(c.name);

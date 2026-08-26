@@ -219,21 +219,34 @@ export async function verifyStartOtp(sql: SqlRowClient, tripId: string, otp: str
   return ok;
 }
 
-/** On-demand OTP re-generation for the rider pre-ride (C5 fix: zero plaintext OTPs at rest). */
-export async function regenerateTripOtp(sql: SqlRowClient, tripId: string): Promise<string> {
+/** On-demand OTP re-generation for the rider pre-ride (C5 fix: zero plaintext OTPs at rest).
+ *  Only a driver waiting at the pickup gets a timed window — regenerating while
+ *  they are still en route mints the same backstop assignment uses. */
+export async function regenerateTripOtp(
+  sql: SqlRowClient,
+  tripId: string,
+): Promise<{ otp: string; expiresInMs: number | null }> {
   const trip = await getTrip(sql, tripId);
   if (!trip) throw new TripError("NOT_FOUND", "trip does not exist");
   if (!["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state)) {
     throw new TripError("INVALID_STATE", "cannot regenerate OTP after trip has started");
   }
   const newOtp = String(randomInt(100000, 999999));
-  await sql.query(
+  const atPickup = trip.state === "ARRIVED";
+  const updated = await sql.query<{ ms: string | number }>(
     `UPDATE otp_codes
-     SET code_hash=$2, attempts=0, expires_at = now() + ($3 || ' milliseconds')::interval
-     WHERE trip_id=$1`,
-    [tripId, hashOtp(tripId, newOtp), String(OTP_TTL_MS)],
+     SET code_hash=$2, attempts=0, expires_at = now() + ($3)::interval
+     WHERE trip_id=$1
+     RETURNING (EXTRACT(EPOCH FROM (expires_at - now())) * 1000)::bigint AS ms`,
+    [tripId, hashOtp(tripId, newOtp), atPickup ? `${OTP_TTL_MS} milliseconds` : "12 hours"],
   );
-  return newOtp;
+  if (updated.rows.length === 0) {
+    throw new TripError("OTP_MISSING", "no start code record for this trip");
+  }
+  return {
+    otp: newOtp,
+    expiresInMs: atPickup ? Math.max(0, Number(updated.rows[0]!.ms)) : null,
+  };
 }
 
 export interface SettlementResult {

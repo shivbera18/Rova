@@ -334,10 +334,10 @@ export default function Book(): React.ReactElement {
             ? {
                 ...full,
                 otp: reissue.otp,
-                otpExpiresAt: reissue.otpExpiresAt,
                 otpExpiresInMs: reissue.otpExpiresInMs,
                 otpAttemptsLeft: reissue.otpAttemptsLeft,
                 otpAttemptsMax: reissue.otpAttemptsMax,
+                otpWindowOpensOnArrival: reissue.otpWindowOpensOnArrival,
               }
             : full,
         });
@@ -558,10 +558,11 @@ export default function Book(): React.ReactElement {
               trip: {
                 ...p.trip,
                 otp: fresh.otp,
-                otpExpiresAt: fresh.otpExpiresAt,
+                otpExpiresAt: undefined,
                 otpExpiresInMs: fresh.otpExpiresInMs,
                 otpAttemptsLeft: fresh.otpAttemptsLeft,
                 otpAttemptsMax: fresh.otpAttemptsMax,
+                otpWindowOpensOnArrival: fresh.otpWindowOpensOnArrival,
               },
             }
           : p,
@@ -979,7 +980,7 @@ export default function Book(): React.ReactElement {
               </p>
             )}
 
-            {phase.trip.otp && (
+            {phase.trip.otp && PRE_START_STATES.includes(phase.trip.state) && (
               <StartCodeBlock
                 otp={phase.trip.otp}
                 expiresInMs={phase.trip.otpExpiresInMs}

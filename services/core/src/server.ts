@@ -47,7 +47,6 @@ import {
   createTripFromAgreement,
   getTrip,
   OTP_MAX_ATTEMPTS,
-  OTP_TTL_MS,
   readFareJson,
   regenerateTripOtp,
   settleTrip,
@@ -989,19 +988,17 @@ export async function startServer(listenPort = PORT): Promise<{
     if (trip.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
     enforceRateLimit(`otp-regen:${id}`, 10, 5 * 60_000);
     try {
-      const otp = await regenerateTripOtp(sql, id);
-      // Hand back the fresh window so the rider UI re-anchors immediately
-      // instead of showing "Expired" under a brand-new code until the next poll.
-      const row = (
-        await sql.query<{ expires_at: Date }>("SELECT expires_at FROM otp_codes WHERE trip_id=$1", [id])
-      ).rows[0];
-      const expiresAt = row ? new Date(row.expires_at) : new Date(Date.now() + OTP_TTL_MS);
+      // The window (if any) comes straight from the database — no app-clock math.
+      const { otp, expiresInMs } = await regenerateTripOtp(sql, id);
       return {
         otp,
-        otpExpiresAt: expiresAt.toISOString(),
-        otpExpiresInMs: Math.max(0, expiresAt.getTime() - Date.now()),
-        otpAttemptsLeft: OTP_MAX_ATTEMPTS,
-        otpAttemptsMax: OTP_MAX_ATTEMPTS,
+        ...(expiresInMs == null
+          ? { otpWindowOpensOnArrival: true }
+          : {
+              otpExpiresInMs: expiresInMs,
+              otpAttemptsLeft: OTP_MAX_ATTEMPTS,
+              otpAttemptsMax: OTP_MAX_ATTEMPTS,
+            }),
       };
     } catch (err) {
       if (err instanceof TripError) fail(409, err.code, err.message);

@@ -168,11 +168,11 @@ function OtpWindowBar({
           Locked after {max} wrong attempts — ask the rider to regenerate
         </span>
       ) : (
-        // Numerals change every second: keep them out of the live region.
-        <span aria-hidden style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-          <span>Code valid for</span>
-          <strong style={{ color: text.startsWith("0:") ? "#b91c1c" : "var(--ink)" }}>{text}</strong>
-          <span>·</span>
+        // Only the per-second numerals are hidden; the attempt count matters.
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <span aria-hidden>Code valid for</span>
+          <strong aria-hidden style={{ color: text.startsWith("0:") ? "#b91c1c" : "var(--ink)" }}>{text}</strong>
+          <span aria-hidden>·</span>
           <span>
             {trip.otpAttemptsLeft} of {max} attempts left
           </span>

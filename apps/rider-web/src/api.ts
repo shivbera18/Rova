@@ -214,10 +214,10 @@ export function cancelMatchedTrip(tripId: string): Promise<{ state: string; dupl
 
 export function regenerateTripOtp(tripId: string): Promise<{
   otp: string;
-  otpExpiresAt: string;
-  otpExpiresInMs: number;
-  otpAttemptsLeft: number;
-  otpAttemptsMax: number;
+  otpExpiresInMs?: number;
+  otpAttemptsLeft?: number;
+  otpAttemptsMax?: number;
+  otpWindowOpensOnArrival?: boolean;
 }> {
   return api(`/v1/trips/${tripId}/regenerate-otp`, { body: {} });
 }

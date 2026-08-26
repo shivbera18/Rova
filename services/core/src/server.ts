@@ -607,10 +607,12 @@ export async function startServer(listenPort = PORT): Promise<{
       const existing = await getNegotiation(sql, id);
       if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
       if (existing.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
+      // Fail while the negotiation is still COUNTERED_DRIVER (recoverable):
+      // committing AGREED without a live driver claim would wedge it forever.
+      const claimed = claimedDriver(existing.request_id);
+      if (claimed === null) fail(409, "NO_DRIVER", "no countering driver to settle with");
       const neg = await riderAcceptCounter(sql, id);
-      const driverId = claimedDriver(neg.request_id);
-      if (!driverId) fail(409, "NO_DRIVER", "countering driver unavailable");
-      const trip = await finalizeAgreement(neg.request_id, neg.id, driverId);
+      const trip = await finalizeAgreement(neg.request_id, neg.id, claimed);
       return { tripId: trip.tripId };
     } catch (err) {
       if (err instanceof NegotationError) fail(409, err.code, err.message);
@@ -630,6 +632,11 @@ export async function startServer(listenPort = PORT): Promise<{
       const existing = await getNegotiation(sql, id);
       if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
       if (existing.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
+      // Fail while the negotiation is still COUNTERED_DRIVER (recoverable):
+      // riderFinalOffer may commit AGREED, which must never happen without a
+      // live driver claim to finalize against.
+      const claimed = claimedDriver(existing.request_id);
+      if (claimed === null) fail(409, "NO_DRIVER", "no countering driver to settle with");
       const updated = await riderFinalOffer(sql, id, paise as never);
       // Record the rider's platform contribution before any finalize reads it.
       await sql.query("UPDATE negotiations SET platform_fee=$2 WHERE id=$1", [id, platformFeePaise]);
@@ -637,9 +644,7 @@ export async function startServer(listenPort = PORT): Promise<{
       if (updated.state === "AGREED") {
         // final ≥ driver's counter carries accept semantics — the claiming driver
         // wins the trip; never rebroadcast an already-agreed negotiation.
-        const driverId = claimedDriver(updated.request_id);
-        if (!driverId) fail(409, "NO_DRIVER", "countering driver unavailable");
-        const trip = await finalizeAgreement(updated.request_id, updated.id, driverId);
+        const trip = await finalizeAgreement(updated.request_id, updated.id, claimed);
         return { state: updated.state, round: updated.round, platformFeePaise, tripId: trip.tripId };
       }
       const rr = (

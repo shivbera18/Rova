@@ -1102,17 +1102,16 @@ export async function startServer(listenPort = PORT): Promise<{
       "SELECT 1 FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2",
       [sess.userId, id],
     );
-    if (existing.rows.length === 0) {
-      const count = await sql.query<{ n: string }>(
-        "SELECT COUNT(*)::text AS n FROM favorite_drivers WHERE rider_id=$1",
-        [sess.userId],
-      );
-      if (Number(count.rows[0]?.n ?? 0) >= 10) fail(409, "FAVORITE_LIMIT", "up to 10 favourite drivers");
-      await sql.query(
-        "INSERT INTO favorite_drivers (rider_id, driver_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-        [sess.userId, id],
-      );
-    }
+    if (existing.rows.length > 0) return { ok: true, duplicate: true };
+    const count = await sql.query<{ n: string }>(
+      "SELECT COUNT(*)::text AS n FROM favorite_drivers WHERE rider_id=$1",
+      [sess.userId],
+    );
+    if (Number(count.rows[0]?.n ?? 0) >= 10) fail(409, "FAVORITE_LIMIT", "up to 10 favourite drivers");
+    await sql.query(
+      "INSERT INTO favorite_drivers (rider_id, driver_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+      [sess.userId, id],
+    );
     return { ok: true };
   });
 

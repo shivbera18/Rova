@@ -63,7 +63,6 @@ function readRoutes(key: string): StoredRoute[] {
 }
 
 const PAY_METHODS = ["UPI", "WALLET", "CASH"] as const;
-const MATCH_TOTAL_S = 45;
 const POPULAR_ROUTES: Array<{ from: string; to: string; pickup: LatLon; drop: LatLon }> = [
   {
     from: "Koramangala",
@@ -140,7 +139,6 @@ export default function Book(): React.ReactElement {
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveDriverPos, setLiveDriverPos] = useState<LatLon | null>(null);
-  const [savedRoutes, setSavedRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.savedRoutes"));
   const [recentRoutes, setRecentRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.recentRoutes"));
   const [showCounterModal, setShowCounterModal] = useState(false);
   const [activeDriverCounter, setActiveDriverCounter] = useState<DriverCounter | null>(null);
@@ -710,8 +708,8 @@ export default function Book(): React.ReactElement {
                 <div style={{ fontWeight: 800, fontSize: 14.5 }}>
                   {phase.trip.driverName || "Driver details on arrival"}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-muted)" }}>
-                  ★ {phase.trip.driverRating.toFixed(1)} · pays via {phase.trip.paymentMethod ?? "UPI"}
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-muted)", display: "flex", alignItems: "center", gap: 4 }}>
+                  <Star size={11} fill="currentColor" /> {phase.trip.driverRating.toFixed(1)} · pays via {phase.trip.paymentMethod ?? "UPI"}
                 </div>
               </div>
               {phase.trip.driverPlate && (

@@ -148,6 +148,14 @@ export const MIGRATIONS = [
 
     -- live journey sharing: opaque per-trip token, minted on demand
     ALTER TABLE trips ADD COLUMN IF NOT EXISTS share_token text UNIQUE;
+
+    CREATE TABLE IF NOT EXISTS safety_contacts (
+      user_id uuid NOT NULL REFERENCES users(id),
+      name text NOT NULL,
+      phone text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, phone)
+    );
     `,
   },
 ];

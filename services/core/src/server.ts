@@ -985,6 +985,43 @@ export async function startServer(listenPort = PORT): Promise<{
     };
   });
 
+  app.get("/v1/safety/contacts", async (req) => {
+    const sess = requireAuth(await session(req));
+    const rows = await sql.query<{ name: string; phone: string }>(
+      "SELECT name, phone FROM safety_contacts WHERE user_id=$1 ORDER BY created_at LIMIT 3",
+      [sess.userId],
+    );
+    return { contacts: rows.rows };
+  });
+
+  app.put("/v1/safety/contacts", async (req) => {
+    const sess = requireAuth(await session(req));
+    const body = req.body as { contacts?: Array<{ name?: string; phone?: string }> };
+    const list = Array.isArray(body.contacts) ? body.contacts.slice(0, 3) : [];
+    const cleanName = (s: unknown): string => String(s ?? "").replace(/[ -­]/g, "").trim().slice(0, 80);
+    const parsed: Array<{ name: string; phone: string }> = [];
+    for (const c of list) {
+      const name = cleanName(c.name);
+      const phone = typeof c.phone === "string" ? c.phone.trim() : "";
+      if (!name || !/^\+[0-9]{10,15}$/.test(phone)) {
+        fail(400, "BAD_CONTACT", "each contact needs a name and an E.164 phone");
+      }
+      if (parsed.some((p) => p.phone === phone)) continue;
+      parsed.push({ name, phone });
+    }
+    await sql.tx!(async (txSql) => {
+      await txSql.query("DELETE FROM safety_contacts WHERE user_id=$1", [sess.userId]);
+      for (const c of parsed) {
+        await txSql.query("INSERT INTO safety_contacts (user_id, name, phone) VALUES ($1,$2,$3)", [
+          sess.userId,
+          c.name,
+          c.phone,
+        ]);
+      }
+    });
+    return { ok: true, contacts: parsed };
+  });
+
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {
     const fare = readFareJson(trip.fare_json);
     const driver = getLiveDriver(trip.driver_id);

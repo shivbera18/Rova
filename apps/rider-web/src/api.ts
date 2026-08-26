@@ -114,6 +114,8 @@ export interface TripView {
   driverRating?: number;
   driverLat?: number;
   driverLng?: number;
+  /** stars the caller already gave on this trip, when they rated */
+  myRatingStars?: number;
   paymentMethod?: "WALLET" | "UPI" | "CASH";
   startedAt?: string;
   endedAt?: string;

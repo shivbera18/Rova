@@ -41,7 +41,9 @@ export async function validateRideRequest(
   validateCoordinates(body.drop, "drop");
 
   // Cash rides bill the rider-side platform fee to user:<id>:POSTPAID with no
-  // digital collection rail yet — cap outstanding debt at ₹200 (plan §7.7).
+  // digital collection rail yet. SOFT cap of ₹200 outstanding debt: checked
+  // outside any lock, so concurrent CASH bookings can briefly exceed it —
+  // acceptable for an advisory guard until the collection rail exists.
   if (body.paymentMethod === "CASH") {
     const postpaid = await sql.query<{ net: string }>(
       `SELECT COALESCE(SUM(CASE WHEN credit_account=$1 THEN amount_paise ELSE 0 END),0)

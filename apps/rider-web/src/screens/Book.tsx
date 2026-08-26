@@ -180,7 +180,11 @@ export default function Book(): React.ReactElement {
             ? { lat: full.driverLat, lng: full.driverLng }
             : null,
         );
-        setPhase({ k: "trip", trip: full });
+        // tripView omits the OTP by design — mint a fresh one for pre-start rides
+        const otp = PRE_START_STATES.includes(full.state)
+          ? await regenerateTripOtp(full.id).then((r) => r.otp).catch(() => undefined)
+          : undefined;
+        setPhase({ k: "trip", trip: otp ? { ...full, otp } : full });
       } catch {
         // stay on the booking sheet; the user can book normally
       }
@@ -378,12 +382,12 @@ export default function Book(): React.ReactElement {
     if (phase.k !== "trip") return;
     try {
       await cancelMatchedTrip(phase.trip.id);
+      reset();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not cancel the trip");
     } finally {
       setShowCancelConfirm(false);
     }
-    reset();
   }
 
   async function handleRegenerateOtp(): Promise<void> {

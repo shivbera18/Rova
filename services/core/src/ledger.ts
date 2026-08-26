@@ -72,7 +72,10 @@ export async function postTransaction(
     );
     if (existing.rows.length > 0) return { txnId: existing.rows[0]!.txn_id, duplicate: true };
 
-    for (const g of balanceGuards) {
+    // Deterministic acquisition order makes future multi-account guards
+    // deadlock-proof; today every caller passes at most one guard.
+    const ordered = [...balanceGuards].sort((a, b) => (a.account < b.account ? -1 : a.account > b.account ? 1 : 0));
+    for (const g of ordered) {
       const bal = await lockedBalance(txSql, g.account);
       if (bal < g.minBalancePaise) {
         throw new InsufficientFundsError("INSUFFICIENT_FUNDS", g.account, bal, g.minBalancePaise);

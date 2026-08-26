@@ -230,7 +230,13 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
         <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
           <button
             className={`brut-btn brut-btn-sm ${online ? "brut-btn-red" : "brut-btn-green"}`}
-            onClick={() => setOnline((prev) => !prev)}
+            onClick={() => {
+              const next = !online;
+              setOnline(next);
+              if (!next) setWsClosedCode(null);
+              // persist across refreshes/shifts; revert the toggle on failure
+              void api.updateStatus({ online: next }).catch(() => setOnline(!next));
+            }}
           >
             {online ? <Square size={13} /> : <Play size={13} />}
             {online ? "Go Offline" : "Go Online"}

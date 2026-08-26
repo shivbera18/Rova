@@ -38,6 +38,8 @@ export function SharePage(): React.ReactElement {
   useEffect(() => {
     if (!token) return;
     let stale = false;
+    let terminal = false;
+    const TERMINAL_STATES = ["COMPLETED", "CANCELLED_RIDER", "CANCELLED_DRIVER"];
     const load = (): void => {
       void fetch(`/v1/share/${encodeURIComponent(token)}`)
         .then(async (res) => {
@@ -49,14 +51,23 @@ export function SharePage(): React.ReactElement {
             return;
           }
           setError(null);
-          setView(json as unknown as ShareView);
+          const next = json as unknown as ShareView;
+          setView(next);
+          if (TERMINAL_STATES.includes(next.state)) terminal = true;
         })
         .catch(() => {
           if (!stale) setError("Could not reach the server");
         });
     };
     load();
-    const iv = setInterval(load, 5000);
+    // stop hammering the endpoint once nothing can change
+    const iv = setInterval(() => {
+      if (terminal) {
+        clearInterval(iv);
+        return;
+      }
+      load();
+    }, 5000);
     return () => {
       stale = true;
       clearInterval(iv);

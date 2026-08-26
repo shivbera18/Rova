@@ -446,6 +446,9 @@ export default function Book(): React.ReactElement {
         "chalox.rider.trip",
         JSON.stringify({ id: phase.trip.id, state: phase.trip.state }),
       );
+    } else {
+      // cancelled/finished rides must not linger as shareable "live" trips
+      localStorage.removeItem("chalox.rider.trip");
     }
   }, [phase]);
 

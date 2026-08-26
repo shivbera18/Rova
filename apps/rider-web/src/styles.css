@@ -931,6 +931,11 @@ button, a, input, select {
   body * {
     visibility: hidden;
   }
+  .shell,
+  .main-area {
+    height: auto !important;
+    overflow: visible !important;
+  }
   .print-area,
   .print-area * {
     visibility: visible;
@@ -939,8 +944,7 @@ button, a, input, select {
     box-shadow: none !important;
   }
   .print-area {
-    position: absolute;
-    inset: 0;
+    position: static;
     padding: 24px;
     font-size: 12pt;
   }

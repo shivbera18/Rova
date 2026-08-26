@@ -115,8 +115,9 @@ export async function createTripFromAgreement(
     throw new TripError("REQUEST_NOT_OPEN", "ride request was cancelled or superseded before agreement");
   }
   await sql.query(
-    "INSERT INTO otp_codes (trip_id, code_hash, expires_at) VALUES ($1,$2,$3)",
-    [id, hashOtp(id, otp), new Date(Date.now() + OTP_TTL_MS)],
+    `INSERT INTO otp_codes (trip_id, code_hash, expires_at)
+     VALUES ($1, $2, now() + ($3 || ' milliseconds')::interval)`,
+    [id, hashOtp(id, otp), String(OTP_TTL_MS)],
   );
   releaseClaim(params.requestId);
 
@@ -160,15 +161,30 @@ export async function transitionTrip(
   );
   if (updated.rows.length === 0) throw new TripError("CONCURRENT_UPDATE", "retry");
 
+  // The start-code window opens when the driver actually reaches the pickup —
+  // that is the moment the code has to be typed — and each arrival gets a
+  // clean attempt budget.
+  if (to === "ARRIVED") {
+    await sql.query(
+      `UPDATE otp_codes SET expires_at = now() + ($2 || ' milliseconds')::interval, attempts = 0
+       WHERE trip_id = $1`,
+      [tripId, String(OTP_TTL_MS)],
+    );
+  }
+
   await publish(TOPICS.tripStateChanged, { tripId, state: to });
   return updated.rows[0]!;
 }
 
-/** Rider must start within 5 minutes of arrival; regenerate mints a fresh window. */
+/**
+ * Start-code policy: the 5-minute window opens on ARRIVED (see transitionTrip)
+ * and every regeneration; the mint at assignment is only a backstop so the row
+ * always exists. Max 3 attempts per window.
+ */
 export const OTP_TTL_MS = 5 * 60_000;
-const OTP_MAX_ATTEMPTS = 3;
+export const OTP_MAX_ATTEMPTS = 3;
 
-/** Rider-read OTP check gates ARRIVED → ONGOING. 5-minute TTL, max 3 attempts. */
+/** Rider-read OTP check gates ARRIVED → ONGOING. 5-minute window, max 3 attempts. */
 export async function verifyStartOtp(sql: SqlRowClient, tripId: string, otp: string): Promise<boolean> {
   const r = await sql.query<{ code_hash: string; attempts: number; expired: boolean }>(
     "SELECT code_hash, attempts, expires_at < now() AS expired FROM otp_codes WHERE trip_id = $1",
@@ -206,8 +222,10 @@ export async function regenerateTripOtp(sql: SqlRowClient, tripId: string): Prom
   }
   const newOtp = String(randomInt(100000, 999999));
   await sql.query(
-    "UPDATE otp_codes SET code_hash=$2, attempts=0, expires_at=$3 WHERE trip_id=$1",
-    [tripId, hashOtp(tripId, newOtp), new Date(Date.now() + OTP_TTL_MS)],
+    `UPDATE otp_codes
+     SET code_hash=$2, attempts=0, expires_at = now() + ($3 || ' milliseconds')::interval
+     WHERE trip_id=$1`,
+    [tripId, hashOtp(tripId, newOtp), String(OTP_TTL_MS)],
   );
   return newOtp;
 }

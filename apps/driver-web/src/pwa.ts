@@ -59,7 +59,9 @@ export function registerPwa(appName: string): void {
       const worker = registration.installing;
       if (!worker) return;
       worker.addEventListener("statechange", () => {
+        // controller exists = this is an UPDATE, not a first install
         if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          waitingWorker = worker;
           showUpdateToast(appName);
         }
       });
@@ -74,6 +76,22 @@ export function registerPwa(appName: string): void {
       location.reload();
     }
   });
+}
+
+/** The installed-but-waiting worker — SKIP_WAITING must target THIS, not the
+ *  currently-controlling old worker (which may predate the message listener). */
+let waitingWorker: ServiceWorker | null = null;
+
+function applyUpdate(): void {
+  updateRequested = true;
+  if (waitingWorker) {
+    waitingWorker.postMessage({ type: "SKIP_WAITING" });
+    // Safety net: if activation stalls for any reason, force the reload — the
+    // waiting worker activates as soon as this tab drops control anyway.
+    setTimeout(() => location.reload(), 3000);
+  } else {
+    location.reload();
+  }
 }
 
 function showUpdateToast(appName: string): void {
@@ -94,10 +112,7 @@ function showUpdateToast(appName: string): void {
   reload.textContent = "Update now";
   reload.style.cssText =
     "padding:7px 14px;font:800 12px system-ui,sans-serif;color:#fff;background:#4f46e5;border:0;border-radius:8px;cursor:pointer";
-  reload.onclick = () => {
-    updateRequested = true;
-    navigator.serviceWorker.controller?.postMessage({ type: "SKIP_WAITING" });
-  };
+  reload.onclick = applyUpdate;
   toast.append(label, reload);
   document.body.append(toast);
 }

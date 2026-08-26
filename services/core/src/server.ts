@@ -808,6 +808,10 @@ export async function startServer(listenPort = PORT): Promise<{
       // completed trip is never left silently unsettled.
       try {
         const retry = await settleTrip(sql, id, 0);
+        const live = getLiveDriver(sess.userId);
+        if (live) live.onTrip = false;
+        pushRider(trip0.rider_id, { t: "trip.state", state: "COMPLETED" });
+        pushDriver(sess.userId, { t: "trip.state", state: "COMPLETED", tripId: id });
         return { state: "COMPLETED", txnId: retry.txnId, duplicate: true };
       } catch (err) {
         if (err instanceof TripError) fail(409, err.code, err.message);

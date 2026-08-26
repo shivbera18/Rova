@@ -66,6 +66,9 @@ export async function postTransaction(
   const executor = sql.tx ? (fn: (txSql: SqlRowClient) => Promise<{ txnId: string; duplicate: boolean }>) => sql.tx!(fn) : (fn: (txSql: SqlRowClient) => Promise<{ txnId: string; duplicate: boolean }>) => fn(sql);
 
   return executor(async (txSql: SqlRowClient) => {
+    // Serialize same-key posters before the dup-check so concurrent retries
+    // resolve cleanly even where an aborted tx would reject follow-up reads.
+    await txSql.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`txnkey:${key}`]);
     const existing = await txSql.query<{ txn_id: string }>(
       "SELECT txn_id FROM journal_entries WHERE idempotency_key = $1 LIMIT 1",
       [key],

@@ -927,15 +927,21 @@ export async function startServer(listenPort = PORT): Promise<{
     }
     let token = trip.share_token ?? null;
     if (!token) {
-      token = randomBytes(16).toString("base64url");
+      const minted = randomBytes(16).toString("base64url");
       const upd = await sql.query<{ share_token: string }>(
         "UPDATE trips SET share_token=$2 WHERE id=$1 AND share_token IS NULL RETURNING share_token",
-        [id, token],
+        [id, minted],
       );
-      token = upd.rows[0]?.share_token ?? token;
+      // A concurrent mint may have won the guarded UPDATE — always trust the row.
+      token = upd.rows[0]?.share_token
+        ?? (await sql.query<{ share_token: string }>("SELECT share_token FROM trips WHERE id=$1", [id])).rows[0]!
+          .share_token!;
     }
-    const origin = process.env.PUBLIC_ORIGIN ?? `${req.protocol}://${req.headers.host ?? "localhost:5173"}`;
-    return { url: `${origin}/share/${token}` };
+    const origin = process.env.PUBLIC_ORIGIN;
+    if (!origin && process.env.NODE_ENV === "production") {
+      fail(500, "SHARE_UNCONFIGURED", "PUBLIC_ORIGIN must be set to build share links");
+    }
+    return { url: `${origin ?? `${req.protocol}://${req.headers.host ?? "localhost:5173"}`}/share/${token}` };
   });
 
   // Public, unauthenticated: the whole point of a journey-share link.

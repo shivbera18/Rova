@@ -665,10 +665,15 @@ export default function Book(): React.ReactElement {
               variant="red"
               fullWidth
               onClick={() => {
-                if (phase.k === "matching") {
-                  void cancelRequest(phase.session.sessionId);
-                  reset();
-                }
+                if (phase.k !== "matching") return;
+                void (async () => {
+                  try {
+                    await cancelRequest(phase.session.sessionId);
+                    reset();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Could not cancel — still matching");
+                  }
+                })();
               }}
             >
               Cancel Request

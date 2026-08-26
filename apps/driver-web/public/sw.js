@@ -15,12 +15,9 @@ const PRECACHE = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting()),
-  );
+  // No install-time skipWaiting: the update toast owns activation so users
+  // consent before a new worker takes control of an open session.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)));
 });
 
 self.addEventListener("activate", (event) => {

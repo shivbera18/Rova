@@ -61,12 +61,14 @@ function insideRoundedSquare(x, y, s, r) {
   return true;
 }
 
-/** Render at `size`; art centred, scaled by `scale` of canvas (maskable uses smaller). */
+/** Render at `size`; art centred, scaled by `scale` of canvas.
+ *  scale 1.0 = full-bleed opaque square (maskable / apple-touch): no rounded
+ *  corners, because transparent corners defeat the mask and iOS blacks them. */
 function renderIcon(size, scale) {
   const buf = Buffer.alloc(size * size * 4);
   const s = size * scale;
   const off = (size - s) / 2;
-  const cornerR = s * 0.18;
+  const cornerR = scale >= 1 ? 0 : s * 0.18;
   const cx = off + s / 2;
   const cy = off + s / 2;
   const ringOuter = s * 0.30;
@@ -107,7 +109,7 @@ for (const app of ["apps/rider-web/public/icons", "apps/driver-web/public/icons"
   mkdirSync(app, { recursive: true });
   writeFileSync(`${app}/icon-512.png`, renderIcon(512, 0.82));
   writeFileSync(`${app}/icon-192.png`, renderIcon(192, 0.82));
-  writeFileSync(`${app}/apple-touch-icon.png`, renderIcon(180, 0.82));
+  writeFileSync(`${app}/apple-touch-icon.png`, renderIcon(180, 1.0));
   writeFileSync(`${app}/favicon-64.png`, renderIcon(64, 0.82));
   writeFileSync(`${app}/icon-512-maskable.png`, renderIcon(512, 1.0));
   writeFileSync(`${app}/icon-192-maskable.png`, renderIcon(192, 1.0));

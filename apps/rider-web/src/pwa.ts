@@ -4,6 +4,8 @@ const DISMISS_KEY = "chalox.pwa.installDismissedAt";
 const DISMISS_DAYS = 14;
 
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
+let reloaded = false;
+let updateRequested = false;
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -64,11 +66,13 @@ export function registerPwa(appName: string): void {
     });
   });
 
-  let reloaded = false;
+  // Only reload when the user consented via the update toast — a first-ever
+  // install claims clients too, and that must never hard-reload the page.
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloaded) return;
-    reloaded = true;
-    location.reload();
+    if (updateRequested && !reloaded) {
+      reloaded = true;
+      location.reload();
+    }
   });
 }
 
@@ -91,6 +95,7 @@ function showUpdateToast(appName: string): void {
   reload.style.cssText =
     "padding:7px 14px;font:800 12px system-ui,sans-serif;color:#fff;background:#4f46e5;border:0;border-radius:8px;cursor:pointer";
   reload.onclick = () => {
+    updateRequested = true;
     navigator.serviceWorker.controller?.postMessage({ type: "SKIP_WAITING" });
   };
   toast.append(label, reload);

@@ -206,12 +206,18 @@ export async function startServer(listenPort = PORT): Promise<{
   }
 
   // ---- auth ------------------------------------------------------------------
+  // The shared dev code must never authenticate anyone outside an explicitly
+  // enabled non-production environment: unset NODE_ENV + no flag stays closed.
+  function devAuthEnabled(): boolean {
+    return process.env.NODE_ENV === "test" || process.env.ENABLE_DEV_ENDPOINTS === "1";
+  }
+
   app.post("/v1/auth/otp/send", async (req) => {
     const { phone } = req.body as { phone?: string };
     if (!phone || !/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
     enforceRateLimit(`otp-ip:${req.ip}`, 10, 10 * 60_000);
     enforceRateLimit(`otp-phone:${phone}`, 5, 10 * 60_000);
-    return { sent: true, devHint: `use ${DEV_OTP}` };
+    return { sent: true, ...(devAuthEnabled() ? { devHint: `use ${DEV_OTP}` } : {}) };
   });
 
   app.post("/v1/auth/otp/verify", async (req) => {
@@ -224,6 +230,11 @@ export async function startServer(listenPort = PORT): Promise<{
       newPassword?: string;
     };
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
+    if (!devAuthEnabled()) {
+      // Fail closed: until a real SMS provider is wired (MSG91 slot, plan §5),
+      // no OTP login exists outside explicitly enabled dev/test environments.
+      fail(503, "OTP_UNAVAILABLE", "OTP delivery is not configured for this environment");
+    }
     if (otp !== DEV_OTP) fail(401, "BAD_OTP", "wrong code");
     const user = await upsertUser(sql, phone!, role!, fullName ?? "Chalo user");
     if (role === "DRIVER") await ensureDriverVehicle(user.id, vehicleClass);

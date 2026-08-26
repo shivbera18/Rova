@@ -138,6 +138,8 @@ class WsBus {
 
 async function main(): Promise<void> {
   // ---- boot a real server against DATABASE_URL (Neon) ------------------------
+  // Test mode unlocks dev OTP + dev endpoints regardless of local .env contents.
+  process.env.NODE_ENV = "test";
   const { startServer } = await import("./server.ts");
   const handle = await startServer(TEST_PORT);
   console.log(`core up on :${TEST_PORT} (storage: ${handle.storage.kind})`);

@@ -230,6 +230,8 @@ export async function startServer(listenPort = PORT): Promise<{
       newPassword?: string;
     };
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
+    enforceRateLimit(`otpv-ip:${req.ip}`, 20, 10 * 60_000);
+    enforceRateLimit(`otpv-phone:${phone}`, 5, 10 * 60_000);
     if (!devAuthEnabled()) {
       // Fail closed: until a real SMS provider is wired (MSG91 slot, plan §5),
       // no OTP login exists outside explicitly enabled dev/test environments.
@@ -253,6 +255,8 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!password || typeof password !== "string" || password.length < 4) {
       fail(400, "WEAK_PASSWORD", "password must be at least 4 characters");
     }
+    enforceRateLimit(`pw-ip:${req.ip}`, 10, 10 * 60_000);
+    enforceRateLimit(`pw-phone:${phone}`, 5, 10 * 60_000);
     const user = await upsertUserWithPassword(sql, phone!, role!, password);
     if (role === "DRIVER") await ensureDriverVehicle(user.id, vehicleClass);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
@@ -265,7 +269,8 @@ export async function startServer(listenPort = PORT): Promise<{
     return { ticket, expiresIn: 60 };
   });
   app.post("/v1/quotes", async (req) => {
-    requireRider(await session(req));
+    const sess = requireRider(await session(req));
+    enforceRateLimit(`quotes:${sess.userId}`, 30, 60_000);
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
     if (!body.pickup || !body.drop) fail(400, "BAD_BODY", "pickup and drop required");
     const classes = body.vehicleClasses ?? [...VEHICLE_CLASSES];

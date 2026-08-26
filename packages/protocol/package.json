@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/*.test.ts || true"
+    "test": "node --test --experimental-strip-types src/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.1"

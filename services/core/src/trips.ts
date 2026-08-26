@@ -7,7 +7,7 @@ import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { Paise, TripState } from "@chalo/protocol";
 import { LEGAL_TRIP_TRANSITIONS } from "@chalo/protocol";
 import { publish, TOPICS } from "./bus.ts";
-import { postTransaction, settlementLines } from "./ledger.ts";
+import { InsufficientFundsError, postTransaction, settlementLines } from "./ledger.ts";
 import { releaseClaim } from "./dispatch.ts";
 import type { SqlRowClient } from "./types.ts";
 import type { TripRow } from "./db/rows.ts";
@@ -127,7 +127,7 @@ export async function createTripFromAgreement(
 
 export async function getTrip(sql: SqlRowClient, tripId: string): Promise<TripRow | null> {
   const r = await sql.query<TripRow>(
-    `SELECT t.*, r.payment_method FROM trips t
+    `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label FROM trips t
      JOIN ride_requests r ON r.id=t.request_id WHERE t.id=$1`,
     [tripId],
   );
@@ -234,6 +234,26 @@ export async function settleTrip(
   if (lines.length === 0) {
     return { txnId: `settle:${tripId}:zero`, duplicate: false, fareJson: { ...fare, tipPaise } };
   }
-  const { txnId, duplicate } = await postTransaction(sql, lines, tripId, `settle:${tripId}`);
+  // Authoritative balance guard inside the posting transaction — the
+  // creation-time check is minutes stale by now and concurrent bookings could
+  // otherwise overdraw the wallet (TOCTOU fix).
+  const riderWallet = `user:${trip.rider_id}:WALLET`;
+  const walletDebit = lines
+    .filter((l) => l.debitAccount === riderWallet)
+    .reduce((s, l) => s + l.amountPaise, 0);
+  const guards =
+    method === "WALLET" && walletDebit > 0
+      ? [{ account: riderWallet, minBalancePaise: walletDebit }]
+      : [];
+  let txnId: string;
+  let duplicate: boolean;
+  try {
+    ({ txnId, duplicate } = await postTransaction(sql, lines, tripId, `settle:${tripId}`, guards));
+  } catch (err) {
+    if (err instanceof InsufficientFundsError) {
+      throw new TripError("INSUFFICIENT_WALLET", "wallet balance dropped below the negotiated total");
+    }
+    throw err;
+  }
   return { txnId, duplicate, fareJson: { ...fare, tipPaise } };
 }

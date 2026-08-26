@@ -142,6 +142,9 @@ export const MIGRATIONS = [
       attempts smallint NOT NULL DEFAULT 0,
       expires_at timestamptz NOT NULL
     );
+
+    ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS pickup_label text;
+    ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS drop_label text;
     `,
   },
 ];

@@ -79,6 +79,8 @@ export interface BroadcastOffer {
   notify?: (driverId: string) => void;
   pickup: LatLon;
   drop: LatLon;
+  pickupLabel?: string | null;
+  dropLabel?: string | null;
   tripKm: number;
   expiresAt: string;
   round: number;
@@ -132,6 +134,8 @@ export async function broadcastOffer(offer: BroadcastOffer): Promise<number> {
       riderRating: offer.riderRating,
       pickup: offer.pickup,
       drop: offer.drop,
+      ...(offer.pickupLabel ? { pickupLabel: offer.pickupLabel } : {}),
+      ...(offer.dropLabel ? { dropLabel: offer.dropLabel } : {}),
       paymentMethod: offer.paymentMethod as DriverOfferPayload["paymentMethod"],
     };
     const sent = d.push({ t: "dispatch.offer", offer: payload });

@@ -36,6 +36,8 @@ export default function OfferSheet({
   quote,
   pickup,
   drop,
+  pickupLabel,
+  dropLabel,
   payMethod,
   onClose,
   onBooked,
@@ -43,6 +45,8 @@ export default function OfferSheet({
   quote: Quote;
   pickup: LatLon;
   drop: LatLon;
+  pickupLabel?: string;
+  dropLabel?: string;
   payMethod: string;
   onClose: () => void;
   onBooked: (session: RequestSessionView) => void;
@@ -68,6 +72,8 @@ export default function OfferSheet({
         quoteToken: quote.quoteToken,
         vehicleClass: quote.vehicleClass as never,
         paymentMethod: payMethod as never,
+        ...(pickupLabel ? { pickupLabel } : {}),
+        ...(dropLabel ? { dropLabel } : {}),
         ...(negotiate
           ? {
               offerPaise: driverPaise,

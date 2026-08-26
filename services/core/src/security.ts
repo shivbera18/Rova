@@ -28,7 +28,7 @@ export function enforceRateLimit(key: string, max: number, windowMs: number): vo
 export async function validateRideRequest(
   sql: SqlRowClient,
   riderId: string,
-  body: { offerPaise?: number; platformFeePaise?: number; pickup: LatLon; drop: LatLon },
+  body: { offerPaise?: number; platformFeePaise?: number; paymentMethod?: string; pickup: LatLon; drop: LatLon },
 ): Promise<void> {
   enforceRateLimit(`ride:${riderId}`, 12, 60_000);
   if (body.offerPaise !== undefined && body.offerPaise > 10_000_000) {
@@ -39,6 +39,27 @@ export async function validateRideRequest(
   }
   validateCoordinates(body.pickup, "pickup");
   validateCoordinates(body.drop, "drop");
+
+  // Cash rides bill the rider-side platform fee to user:<id>:POSTPAID with no
+  // digital collection rail yet. SOFT cap of ₹200 outstanding debt: checked
+  // outside any lock, so concurrent CASH bookings can briefly exceed it —
+  // acceptable for an advisory guard until the collection rail exists.
+  if (body.paymentMethod === "CASH") {
+    const postpaid = await sql.query<{ net: string }>(
+      `SELECT COALESCE(SUM(CASE WHEN credit_account=$1 THEN amount_paise ELSE 0 END),0)
+         - COALESCE(SUM(CASE WHEN debit_account=$1 THEN amount_paise ELSE 0 END),0) AS net
+       FROM journal_entries`,
+      [`user:${riderId}:POSTPAID`],
+    );
+    const owed = -Number(postpaid.rows[0]?.net ?? 0);
+    if (owed >= 20_000) {
+      throw new SecurityError(
+        402,
+        "POSTPAID_LIMIT",
+        `₹${(owed / 100).toFixed(2)} in cash-ride fees is pending — pay a digital ride first`,
+      );
+    }
+  }
 
   const active = await sql.query<{ n: string }>(
     `SELECT COUNT(*) AS n FROM ride_requests

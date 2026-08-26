@@ -49,6 +49,8 @@ type Phase =
   | { k: "trip"; trip: TripView }
   | { k: "done"; trip: TripView };
 
+const ACTIVE_TRIP_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED", "ONGOING"];
+
 interface StoredRoute {
   id: string;
   label: string;
@@ -161,6 +163,35 @@ export default function Book(): React.ReactElement {
     void getWallet()
       .then((w) => setWalletBalance(w.balancePaise))
       .catch(() => undefined);
+  }, []);
+
+  // Reload recovery: an in-flight trip must survive a page refresh.
+  useEffect(() => {
+    let stale = false;
+    void (async () => {
+      try {
+        const { trips } = await listTrips();
+        const active = trips.find((t) => ACTIVE_TRIP_STATES.includes(t.state));
+        if (!active || stale) return;
+        const full = await getTrip(active.id);
+        if (stale || !ACTIVE_TRIP_STATES.includes(full.state)) return;
+        setLiveDriverPos(
+          full.driverLat != null && full.driverLng != null
+            ? { lat: full.driverLat, lng: full.driverLng }
+            : null,
+        );
+        // tripView omits the OTP by design — mint a fresh one for pre-start rides
+        const otp = PRE_START_STATES.includes(full.state)
+          ? await regenerateTripOtp(full.id).then((r) => r.otp).catch(() => undefined)
+          : undefined;
+        setPhase({ k: "trip", trip: otp ? { ...full, otp } : full });
+      } catch {
+        // stay on the booking sheet; the user can book normally
+      }
+    })();
+    return () => {
+      stale = true;
+    };
   }, []);
 
   async function handleTopUp(): Promise<void> {
@@ -351,12 +382,12 @@ export default function Book(): React.ReactElement {
     if (phase.k !== "trip") return;
     try {
       await cancelMatchedTrip(phase.trip.id);
+      reset();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not cancel the trip");
     } finally {
       setShowCancelConfirm(false);
     }
-    reset();
   }
 
   async function handleRegenerateOtp(): Promise<void> {
@@ -559,14 +590,16 @@ export default function Book(): React.ReactElement {
                     <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-muted)" }}>
                       Balance: {walletBalance !== null ? formatINR(paisa(walletBalance)) : "…"}
                     </span>
-                    <button
-                      type="button"
-                      className="use-location-btn"
-                      style={{ padding: "4px 12px", width: "auto" }}
-                      onClick={() => void handleTopUp()}
-                    >
-                      + Add ₹500 (dev)
-                    </button>
+                    {import.meta.env.DEV && (
+                      <button
+                        type="button"
+                        className="use-location-btn"
+                        style={{ padding: "4px 12px", width: "auto" }}
+                        onClick={() => void handleTopUp()}
+                      >
+                        + Add ₹500 (dev)
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -627,6 +660,8 @@ export default function Book(): React.ReactElement {
             quote={phase.quote}
             pickup={pickup}
             drop={drop}
+            pickupLabel={pickupLabel}
+            dropLabel={dropLabel}
             payMethod={payMethod}
             onClose={() => setPhase({ k: "quotes", quotes: [phase.quote] })}
             onBooked={(session) => {
@@ -663,10 +698,15 @@ export default function Book(): React.ReactElement {
               variant="red"
               fullWidth
               onClick={() => {
-                if (phase.k === "matching") {
-                  void cancelRequest(phase.session.sessionId);
-                  reset();
-                }
+                if (phase.k !== "matching") return;
+                void (async () => {
+                  try {
+                    await cancelRequest(phase.session.sessionId);
+                    reset();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Could not cancel — still matching");
+                  }
+                })();
               }}
             >
               Cancel Request

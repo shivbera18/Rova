@@ -53,7 +53,7 @@ import {
   TripError,
   verifyStartOtp,
 } from "./trips.ts";
-import { postTransaction, walletBalance } from "./ledger.ts";
+import { InsufficientFundsError, postTransaction, walletBalance } from "./ledger.ts";
 import type { LatLon } from "./types.ts";
 import type { TripRow } from "./db/rows.ts";
 import { enforceRateLimit, validateDriverGps, validateRideRequest } from "./security.ts";
@@ -230,6 +230,9 @@ export async function startServer(listenPort = PORT): Promise<{
       newPassword?: string;
     };
     if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
+    if (!/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
+    enforceRateLimit(`otpv-ip:${req.ip}`, 20, 10 * 60_000);
+    enforceRateLimit(`otpv-phone:${phone}`, 5, 10 * 60_000);
     if (!devAuthEnabled()) {
       // Fail closed: until a real SMS provider is wired (MSG91 slot, plan §5),
       // no OTP login exists outside explicitly enabled dev/test environments.
@@ -249,10 +252,12 @@ export async function startServer(listenPort = PORT): Promise<{
       role?: "RIDER" | "DRIVER";
       vehicleClass?: string;
     };
-    if (!phone || (role !== "RIDER" && role !== "DRIVER")) fail(400, "BAD_BODY", "phone + role required");
+    if (!phone || !/^\+[0-9]{10,15}$/.test(phone)) fail(400, "BAD_PHONE", "E.164 required");
     if (!password || typeof password !== "string" || password.length < 4) {
       fail(400, "WEAK_PASSWORD", "password must be at least 4 characters");
     }
+    enforceRateLimit(`pw-ip:${req.ip}`, 10, 10 * 60_000);
+    enforceRateLimit(`pw-phone:${phone}`, 5, 10 * 60_000);
     const user = await upsertUserWithPassword(sql, phone!, role!, password);
     if (role === "DRIVER") await ensureDriverVehicle(user.id, vehicleClass);
     return { token: await issueToken(user.id, role!), userId: user.id, role };
@@ -265,7 +270,8 @@ export async function startServer(listenPort = PORT): Promise<{
     return { ticket, expiresIn: 60 };
   });
   app.post("/v1/quotes", async (req) => {
-    requireRider(await session(req));
+    const sess = requireRider(await session(req));
+    enforceRateLimit(`quotes:${sess.userId}`, 30, 60_000);
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
     if (!body.pickup || !body.drop) fail(400, "BAD_BODY", "pickup and drop required");
     const classes = body.vehicleClasses ?? [...VEHICLE_CLASSES];
@@ -298,7 +304,9 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!Number.isSafeInteger(amountPaise) || amountPaise! < 1000 || amountPaise! > 100_000) {
       fail(400, "INVALID_TOPUP", "top-up must be between ₹10 and ₹1,000");
     }
-    if (process.env.NODE_ENV === "production") {
+    if (!devAuthEnabled()) {
+      // Free money: only explicitly enabled dev/test environments may top up
+      // without a real payment gateway behind this endpoint.
       fail(501, "PAYMENT_PROVIDER_REQUIRED", "production top-up requires payment gateway confirmation");
     }
     const txn = await postTransaction(
@@ -337,11 +345,17 @@ export async function startServer(listenPort = PORT): Promise<{
       paymentMethod?: "WALLET" | "UPI" | "CASH";
       pickup?: LatLon;
       drop?: LatLon;
+      pickupLabel?: string;
+      dropLabel?: string;
     };
     const payload = body.quoteToken ? verifyQuoteToken(body.quoteToken) : null;
     if (!payload || !body.vehicleClass || !body.paymentMethod || !body.pickup || !body.drop) {
       fail(400, "BAD_BODY", "quoteToken, vehicleClass, paymentMethod, pickup, drop required");
     }
+    const clean = (s: string | undefined): string | null =>
+      typeof s === "string"
+        ? s.replace(/[\u0000-\u001f\u007f\u00ad]/g, "").trim().slice(0, 200) || null
+        : null;
     const negotiated = typeof body.offerPaise === "number";
     const platformContribution = negotiated ? (body.platformFeePaise ?? payload.pf) : payload.pf;
     if (negotiated && (!Number.isSafeInteger(body.offerPaise) || body.offerPaise! < 0)) {
@@ -353,6 +367,7 @@ export async function startServer(listenPort = PORT): Promise<{
     await validateRideRequest(sql, sess.userId, {
       offerPaise: body.offerPaise,
       platformFeePaise: body.platformFeePaise,
+      paymentMethod: body.paymentMethod,
       pickup: body.pickup,
       drop: body.drop,
     });
@@ -374,8 +389,9 @@ export async function startServer(listenPort = PORT): Promise<{
     await sql.query(
       `INSERT INTO ride_requests
          (id, rider_id, city_id, vehicle_class, mode, state, payment_method,
-          pickup_lat, pickup_lng, drop_lat, drop_lng, list_price, platform_fee)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          pickup_lat, pickup_lng, drop_lat, drop_lng, list_price, platform_fee,
+          pickup_label, drop_label)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         requestId,
         sess.userId,
@@ -390,6 +406,8 @@ export async function startServer(listenPort = PORT): Promise<{
         body.drop!.lng,
         payload!.lp,
         platformContribution,
+        clean(body.pickupLabel),
+        clean(body.dropLabel),
       ],
     );
 
@@ -423,6 +441,8 @@ export async function startServer(listenPort = PORT): Promise<{
       takeHomePaise: negotiated ? body.offerPaise! : payload!.tf,
       pickup: body.pickup!,
       drop: body.drop!,
+      pickupLabel: clean(body.pickupLabel),
+      dropLabel: clean(body.dropLabel),
       expiresAt: expiresAt.toISOString(),
       round: 1,
       isCounter: false,
@@ -452,6 +472,8 @@ export async function startServer(listenPort = PORT): Promise<{
     takeHomePaise: number;
     pickup: LatLon;
     drop: LatLon;
+    pickupLabel?: string | null;
+    dropLabel?: string | null;
     expiresAt: string;
     round: number;
     isCounter: boolean;
@@ -475,6 +497,8 @@ export async function startServer(listenPort = PORT): Promise<{
       takeHomePaise: o.takeHomePaise as never,
       pickup: o.pickup,
       drop: o.drop,
+      pickupLabel: o.pickupLabel ?? null,
+      dropLabel: o.dropLabel ?? null,
       tripKm: km,
       expiresAt: o.expiresAt,
       round: o.round,
@@ -567,6 +591,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const { id } = req.params as { id: string };
     const { paise } = req.body as { paise?: number };
     if (!Number.isSafeInteger(paise) || paise! < 0) fail(400, "BAD_BODY", "non-negative paise required");
+    if (paise! > 10_000_000) fail(400, "OFFER_TOO_HIGH", "Driver ask exceeds ₹1,00,000 fraud limit");
     try {
       const neg0 = await getNegotiation(sql, id);
       if (!neg0) fail(404, "NOT_FOUND", "no such negotiation");
@@ -626,6 +651,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const { id } = req.params as { id: string };
     const { paise, platformFeePaise } = req.body as { paise?: number; platformFeePaise?: number };
     if (!Number.isSafeInteger(paise) || paise! < 0) fail(400, "BAD_BODY", "non-negative driver paise required");
+    if (paise! > 10_000_000) fail(400, "OFFER_TOO_HIGH", "Final offer exceeds ₹1,00,000 fraud limit");
     if (!Number.isSafeInteger(platformFeePaise) || platformFeePaise! < 0) {
       fail(400, "BAD_BODY", "non-negative platform contribution required");
     }
@@ -666,8 +692,16 @@ export async function startServer(listenPort = PORT): Promise<{
         return { state: updated.state, round: updated.round, platformFeePaise, tripId: trip.tripId };
       }
       const rr = (
-        await sql.query<{ pickup_lat: number; pickup_lng: number; drop_lat: number; drop_lng: number; payment_method: string }>(
-          "SELECT * FROM ride_requests WHERE id=$1",
+        await sql.query<{
+          pickup_lat: number;
+          pickup_lng: number;
+          drop_lat: number;
+          drop_lng: number;
+          payment_method: string;
+          pickup_label: string | null;
+          drop_label: string | null;
+        }>(
+          "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng, payment_method, pickup_label, drop_label FROM ride_requests WHERE id=$1",
           [updated.request_id],
         )
       ).rows[0]!;
@@ -677,6 +711,8 @@ export async function startServer(listenPort = PORT): Promise<{
         takeHomePaise: updated.current_offer,
         pickup: { lat: rr.pickup_lat, lng: rr.pickup_lng },
         drop: { lat: rr.drop_lat, lng: rr.drop_lng },
+        pickupLabel: rr.pickup_label,
+        dropLabel: rr.drop_label,
         expiresAt: new Date(updated.expires_at).toISOString(),
         round: updated.round,
         isCounter: true,
@@ -766,7 +802,22 @@ export async function startServer(listenPort = PORT): Promise<{
     const trip0 = await getTrip(sql, id);
     if (!trip0) fail(404, "NOT_FOUND", "no such trip");
     if (trip0.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
-    if (trip0.state === "COMPLETED") return { state: "COMPLETED", duplicate: true };
+    if (trip0.state === "COMPLETED") {
+      // Settlement may have failed after the state flip (e.g. wallet guard);
+      // settleTrip is idempotent by `settle:<tripId>` — retry it here so a
+      // completed trip is never left silently unsettled.
+      try {
+        const retry = await settleTrip(sql, id, 0);
+        const live = getLiveDriver(sess.userId);
+        if (live) live.onTrip = false;
+        pushRider(trip0.rider_id, { t: "trip.state", state: "COMPLETED" });
+        pushDriver(sess.userId, { t: "trip.state", state: "COMPLETED", tripId: id });
+        return { state: "COMPLETED", txnId: retry.txnId, duplicate: true };
+      } catch (err) {
+        if (err instanceof TripError) fail(409, err.code, err.message);
+        throw err;
+      }
+    }
     try {
       await transitionTrip(sql, id, "COMPLETED");
       const settlement = await settleTrip(sql, id, 0);
@@ -805,16 +856,23 @@ export async function startServer(listenPort = PORT): Promise<{
     if (trip.payment_method === "WALLET" && (await walletBalance(sql, source)) < amountPaise!) {
       fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this tip");
     }
-    const txn = await postTransaction(
-      sql,
-      [{ debitAccount: source, creditAccount: `driver:${trip.driver_id}:WALLET`, amountPaise: amountPaise!, reason: "TIP" }],
-      id,
-      `tip:${id}`,
-    );
-    const fare = readFareJson(trip.fare_json);
-    fare.tipPaise = amountPaise!;
-    await sql.query("UPDATE trips SET fare_json=$2 WHERE id=$1", [id, JSON.stringify(fare)]);
-    return { ok: true, txnId: txn.txnId, duplicate: txn.duplicate };
+    try {
+      // Guard only real wallets — clearing is a netting account that may sit negative.
+      const txn = await postTransaction(
+        sql,
+        [{ debitAccount: source, creditAccount: `driver:${trip.driver_id}:WALLET`, amountPaise: amountPaise!, reason: "TIP" }],
+        id,
+        `tip:${id}`,
+        trip.payment_method === "WALLET" ? [{ account: source, minBalancePaise: amountPaise! }] : [],
+      );
+      const fare = readFareJson(trip.fare_json);
+      fare.tipPaise = amountPaise!;
+      await sql.query("UPDATE trips SET fare_json=$2 WHERE id=$1", [id, JSON.stringify(fare)]);
+      return { ok: true, txnId: txn.txnId, duplicate: txn.duplicate };
+    } catch (err) {
+      if (err instanceof InsufficientFundsError) fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this tip");
+      throw err;
+    }
   });
 
   app.post("/v1/trips/:id/cancel-rider", async (req) => {
@@ -870,6 +928,8 @@ export async function startServer(listenPort = PORT): Promise<{
       vehicleClass: trip.vehicle_class,
       pickup: { lat: trip.pickup_lat, lng: trip.pickup_lng },
       drop: { lat: trip.drop_lat, lng: trip.drop_lng },
+      pickupLabel: trip.pickup_label ?? undefined,
+      dropLabel: trip.drop_label ?? undefined,
       fareBreakdown: fare,
       paymentMethod: trip.payment_method ?? "UPI",
       startedAt: trip.started_at ? new Date(trip.started_at).toISOString() : undefined,
@@ -1183,7 +1243,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = requireAuth(await session(req));
     const col = sess.role === "RIDER" ? "rider_id" : "driver_id";
     const rows = await sql.query<TripRow & Record<string, unknown>>(
-      `SELECT t.*, r.payment_method FROM trips t
+      `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label FROM trips t
        JOIN ride_requests r ON r.id=t.request_id
        WHERE t.${col}=$1 ORDER BY r.created_at DESC LIMIT 50`,
       [sess.userId],
@@ -1233,15 +1293,20 @@ export async function startServer(listenPort = PORT): Promise<{
     const { amountPaise } = req.body as { amountPaise?: number };
     if (!Number.isSafeInteger(amountPaise) || amountPaise! < 20_000) fail(400, "INVALID_PAYOUT", "minimum payout is ₹200");
     const account = `driver:${sess.userId}:WALLET`;
-    const balance = await walletBalance(sql, account);
-    if (balance < amountPaise!) fail(409, "INSUFFICIENT_BALANCE", "payout exceeds wallet balance");
-    const txn = await postTransaction(
-      sql,
-      [{ debitAccount: account, creditAccount: `external:BANK:${sess.userId}`, amountPaise: amountPaise!, reason: "PAYOUT" }],
-      null,
-      `payout:${sess.userId}:${randomUUID()}`,
-    );
-    return { ok: true, txnId: txn.txnId, balancePaise: await walletBalance(sql, account) };
+    try {
+      // Guard inside the posting tx: concurrent payouts cannot double-spend.
+      const txn = await postTransaction(
+        sql,
+        [{ debitAccount: account, creditAccount: `external:BANK:${sess.userId}`, amountPaise: amountPaise!, reason: "PAYOUT" }],
+        null,
+        `payout:${sess.userId}:${randomUUID()}`,
+        [{ account, minBalancePaise: amountPaise! }],
+      );
+      return { ok: true, txnId: txn.txnId, balancePaise: await walletBalance(sql, account) };
+    } catch (err) {
+      if (err instanceof InsufficientFundsError) fail(409, "INSUFFICIENT_BALANCE", "payout exceeds wallet balance");
+      throw err;
+    }
   });
 
   app.post("/v1/driver/onboarding", async (req) => {

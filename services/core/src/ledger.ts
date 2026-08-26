@@ -15,11 +15,45 @@ export interface Line {
   reason: LedgerReason;
 }
 
+/** Debit blocked unless `account` holds at least `minBalancePaise` when lines post. */
+export interface BalanceGuard {
+  account: string;
+  minBalancePaise: number;
+}
+
+export class InsufficientFundsError extends Error {
+  public statusCode = 402;
+  constructor(
+    public code: string,
+    public account: string,
+    public balancePaise: number,
+    public requiredPaise: number,
+  ) {
+    super(`account ${account} holds ₹${(balancePaise / 100).toFixed(2)}, needs ₹${(requiredPaise / 100).toFixed(2)}`);
+  }
+}
+
+async function lockedBalance(txSql: SqlRowClient, account: string): Promise<number> {
+  // Serialize per-account mutations so concurrent settlements/payouts cannot
+  // both pass a stale balance check (TOCTOU fix).
+  await txSql.query("SELECT pg_advisory_xact_lock(hashtext($1))", [account]);
+  const r = await txSql.query<{ net: string }>(
+    `SELECT
+       COALESCE(SUM(CASE WHEN credit_account = $1 THEN amount_paise ELSE 0 END),0)
+     - COALESCE(SUM(CASE WHEN debit_account = $1 THEN amount_paise ELSE 0 END),0)
+     AS net
+     FROM journal_entries`,
+    [account],
+  );
+  return Number(r.rows[0]?.net ?? 0);
+}
+
 export async function postTransaction(
   sql: SqlRowClient,
   lines: Line[],
   tripId: string | null,
   idempotencyKey: string | null = null,
+  balanceGuards: BalanceGuard[] = [],
 ): Promise<{ txnId: string; duplicate: boolean }> {
   const key = idempotencyKey ?? `auto:${randomUUID()}`;
 
@@ -32,21 +66,47 @@ export async function postTransaction(
   const executor = sql.tx ? (fn: (txSql: SqlRowClient) => Promise<{ txnId: string; duplicate: boolean }>) => sql.tx!(fn) : (fn: (txSql: SqlRowClient) => Promise<{ txnId: string; duplicate: boolean }>) => fn(sql);
 
   return executor(async (txSql: SqlRowClient) => {
+    // Serialize same-key posters before the dup-check so concurrent retries
+    // resolve cleanly even where an aborted tx would reject follow-up reads.
+    await txSql.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`txnkey:${key}`]);
     const existing = await txSql.query<{ txn_id: string }>(
       "SELECT txn_id FROM journal_entries WHERE idempotency_key = $1 LIMIT 1",
       [key],
     );
     if (existing.rows.length > 0) return { txnId: existing.rows[0]!.txn_id, duplicate: true };
 
+    // Deterministic acquisition order makes future multi-account guards
+    // deadlock-proof; today every caller passes at most one guard.
+    const ordered = [...balanceGuards].sort((a, b) => (a.account < b.account ? -1 : a.account > b.account ? 1 : 0));
+    for (const g of ordered) {
+      const bal = await lockedBalance(txSql, g.account);
+      if (bal < g.minBalancePaise) {
+        throw new InsufficientFundsError("INSUFFICIENT_FUNDS", g.account, bal, g.minBalancePaise);
+      }
+    }
+
     const txnId = randomUUID();
-    for (const [i, l] of lines.entries()) {
-      const lineKey = i === 0 ? key : null;
-      await txSql.query(
-        `INSERT INTO journal_entries
-           (txn_id, debit_account, credit_account, amount_paise, reason, trip_id, idempotency_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [txnId, l.debitAccount, l.creditAccount, l.amountPaise, l.reason, tripId, lineKey],
-      );
+    try {
+      for (const [i, l] of lines.entries()) {
+        const lineKey = i === 0 ? key : null;
+        await txSql.query(
+          `INSERT INTO journal_entries
+             (txn_id, debit_account, credit_account, amount_paise, reason, trip_id, idempotency_key)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [txnId, l.debitAccount, l.creditAccount, l.amountPaise, l.reason, tripId, lineKey],
+        );
+      }
+    } catch (err: unknown) {
+      // A concurrent poster won the UNIQUE(idempotency_key) race between our
+      // dup-check and insert — surface its txn instead of a 23505 error.
+      if ((err as { code?: string }).code === "23505") {
+        const winner = await txSql.query<{ txn_id: string }>(
+          "SELECT txn_id FROM journal_entries WHERE idempotency_key = $1 LIMIT 1",
+          [key],
+        );
+        if (winner.rows[0]) return { txnId: winner.rows[0].txn_id, duplicate: true };
+      }
+      throw err;
     }
     return { txnId, duplicate: false };
   });

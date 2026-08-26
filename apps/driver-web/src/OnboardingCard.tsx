@@ -106,7 +106,7 @@ export function OnboardingCard({
           Submit Documents for Review
         </NeoButton>
 
-        {status === "IN_REVIEW" && (
+        {status === "IN_REVIEW" && import.meta.env.DEV && (
           <NeoButton
             variant="green"
             fullWidth

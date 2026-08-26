@@ -63,6 +63,10 @@ driver-web:dev:  ➜  Local:   http://localhost:5174/
 
 ### Pre-Seeded Test Logins (Dev OTP: `123456`)
 
+> Dev conveniences (OTP `123456`, wallet top-up button, dev endpoints) require
+> `ENABLE_DEV_ENDPOINTS=1` in `services/core/.env` — copy `.env.example`. They
+> are refused in any environment without the flag.
+
 | Role | Phone | Vehicle Class | URL |
 |---|---|---|---|
 | **Rider** | `+919900000001` | — | http://localhost:5173/ |

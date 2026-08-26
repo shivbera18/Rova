@@ -80,14 +80,27 @@ export async function postTransaction(
     }
 
     const txnId = randomUUID();
-    for (const [i, l] of lines.entries()) {
-      const lineKey = i === 0 ? key : null;
-      await txSql.query(
-        `INSERT INTO journal_entries
-           (txn_id, debit_account, credit_account, amount_paise, reason, trip_id, idempotency_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [txnId, l.debitAccount, l.creditAccount, l.amountPaise, l.reason, tripId, lineKey],
-      );
+    try {
+      for (const [i, l] of lines.entries()) {
+        const lineKey = i === 0 ? key : null;
+        await txSql.query(
+          `INSERT INTO journal_entries
+             (txn_id, debit_account, credit_account, amount_paise, reason, trip_id, idempotency_key)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [txnId, l.debitAccount, l.creditAccount, l.amountPaise, l.reason, tripId, lineKey],
+        );
+      }
+    } catch (err: unknown) {
+      // A concurrent poster won the UNIQUE(idempotency_key) race between our
+      // dup-check and insert — surface its txn instead of a 23505 error.
+      if ((err as { code?: string }).code === "23505") {
+        const winner = await txSql.query<{ txn_id: string }>(
+          "SELECT txn_id FROM journal_entries WHERE idempotency_key = $1 LIMIT 1",
+          [key],
+        );
+        if (winner.rows[0]) return { txnId: winner.rows[0].txn_id, duplicate: true };
+      }
+      throw err;
     }
     return { txnId, duplicate: false };
   });

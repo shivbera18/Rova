@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatINR, paisa } from "@chalo/protocol";
-import { Rocket, Star, TriangleAlert, User } from "lucide-react";
+import { Heart, Rocket, Star, TriangleAlert, User } from "lucide-react";
 import { api, type Offer } from "./api";
 import { NeoCard, NeoButton, NeoBadge } from "./NeoComponents";
 
@@ -154,6 +154,25 @@ export function OfferCard({
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><User size={13} /> {offer.riderName || "Rider"}</span>
         <span>·</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Star size={12} fill="currentColor" /> {offer.riderRating ? offer.riderRating.toFixed(1) : "4.8"}</span>
+        {offer.isRepeatRequest && (
+          <>
+            <span>·</span>
+            <span
+              className="row"
+              style={{
+                gap: 4,
+                color: "#ffffff",
+                background: "var(--primary)",
+                fontWeight: 800,
+                padding: "1px 8px",
+                borderRadius: "var(--radius-xs)",
+                border: "var(--brut-border-thin)",
+              }}
+            >
+              <Heart size={11} fill="currentColor" /> Repeat rider — saved you
+            </span>
+          </>
+        )}
         <span>·</span>
         <span style={{ color: "var(--primary)", fontWeight: 700 }}>100% earnings to wallet</span>
       </div>

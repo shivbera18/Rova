@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { LatLon } from "@chalo/protocol";
 import { formatINR, paisa } from "@chalo/protocol";
-import { Banknote, Bike, Bus, Car, CarFront, CarTaxiFront, Sparkles, TriangleAlert, X, Zap } from "lucide-react";
+import { Banknote, Bike, Bus, Car, CarFront, CarTaxiFront, Heart, Sparkles, TriangleAlert, X, Zap } from "lucide-react";
 import type { RequestSessionView, Quote } from "../api";
 import { createRequest } from "../api";
 
@@ -38,6 +38,7 @@ export default function OfferSheet({
   drop,
   pickupLabel,
   dropLabel,
+  favoriteDriverId,
   payMethod,
   walletBalance,
   onClose,
@@ -48,6 +49,8 @@ export default function OfferSheet({
   drop: LatLon;
   pickupLabel?: string;
   dropLabel?: string;
+  /** set when the rider picked a favourite — request goes straight to them */
+  favoriteDriverId?: string | null;
   payMethod: string;
   walletBalance?: number | null;
   onClose: () => void;
@@ -81,6 +84,7 @@ export default function OfferSheet({
         quoteToken: quote.quoteToken,
         vehicleClass: quote.vehicleClass as never,
         paymentMethod: payMethod as never,
+        ...(favoriteDriverId ? { driverId: favoriteDriverId } : {}),
         ...(pickupLabel ? { pickupLabel } : {}),
         ...(dropLabel ? { dropLabel } : {}),
         ...(negotiate
@@ -123,6 +127,25 @@ export default function OfferSheet({
           <X size={16} />
         </button>
       </div>
+
+      {/* Direct-to-driver hint */}
+      {favoriteDriverId && (
+        <div
+          className="spread"
+          style={{
+            padding: "8px 12px",
+            marginBottom: 14,
+            background: "var(--primary-soft)",
+            border: "var(--brut-border-thin)",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          <Heart size={13} fill="currentColor" />
+          <span>This request goes straight to your favourite driver — no other driver sees it.</span>
+        </div>
+      )}
 
       {/* Benchmark Standard Fare Banner */}
       <div

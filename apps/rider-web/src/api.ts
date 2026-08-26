@@ -143,6 +143,24 @@ export function saveContacts(contacts: { contacts: Array<{ name?: string; phone?
   return api("/v1/safety/contacts", { method: "PUT", body: contacts });
 }
 
+// ---- favourite drivers ("ride again") ------------------------------------------
+
+export interface FavoriteDriver {
+  id: string;
+  name: string;
+  vehicleClass: string | null;
+  plate: string | null;
+  rating: number;
+}
+
+export function getFavorites(): Promise<{ favorites: FavoriteDriver[] }> {
+  return api("/v1/rider/favorites");
+}
+
+export function toggleFavorite(driverId: string, on: boolean): Promise<{ ok: true }> {
+  return api(`/v1/drivers/${driverId}/favorite`, { method: on ? "PUT" : "DELETE", body: {} });
+}
+
 // ---- negotiation (rider side) ------------------------------------------------
 // Stable domain endpoints shared with the driver console's mirror functions.
 

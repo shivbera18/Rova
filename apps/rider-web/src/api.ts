@@ -70,6 +70,8 @@ export interface RequestSessionView {
   mode: "LIST" | "NEGOTIATED";
   state: "MATCHING" | "NEGOTIATING" | "AGREED" | "EXPIRED" | "DECLINED" | "CANCELLED";
   negotiationId?: string;
+  /** direct-to-driver requests: how many drivers actually received it (0/1) */
+  deliveredToDrivers?: number;
   currentOfferPaise?: number;
   platformFeePaise?: number;
   riderTotalPaise?: number;

@@ -3,7 +3,7 @@ import type { LatLon } from "@chalo/protocol";
 import { formatINR, paisa } from "@chalo/protocol";
 import { Banknote, Bike, Bus, Car, CarFront, CarTaxiFront, Heart, Sparkles, TriangleAlert, X, Zap } from "lucide-react";
 import type { RequestSessionView, Quote } from "../api";
-import { createRequest } from "../api";
+import { cancelRequest, createRequest } from "../api";
 
 export const EXPLAINER_COPY =
   "This contribution funds Chalo-X servers, dispatch, support and safety. You may change it — even to ₹0 — before sending your offer.";
@@ -96,6 +96,12 @@ export default function OfferSheet({
         pickup,
         drop,
       });
+      // A direct request nobody received would sit "matching" until timeout —
+      // cancel it immediately and tell the rider their driver is unavailable.
+      if (favoriteDriverId && session.deliveredToDrivers === 0) {
+        await cancelRequest(session.sessionId).catch(() => undefined);
+        throw new Error("Your driver just went offline — try again or book standard");
+      }
       onBooked(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not place request");

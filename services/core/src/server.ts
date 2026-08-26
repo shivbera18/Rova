@@ -570,6 +570,12 @@ export async function startServer(listenPort = PORT): Promise<{
         fail(409, "ALREADY_CLAIMED", "another driver is countering");
       }
       const updated = await driverCounter(sql, id, sess.userId, paise as never);
+      if (updated.state === "AGREED") {
+        // counter ≤ rider's offer carries accept semantics — create the trip now
+        // instead of leaking an AGREED negotiation with a permanently held claim.
+        const trip = await finalizeAgreement(updated.request_id, updated.id, sess.userId);
+        return { state: updated.state, round: updated.round, tripId: trip.tripId };
+      }
       pushRider(neg0.rider_id, {
         t: "negotiation.counter",
         negotiationId: updated.id,
@@ -621,8 +627,17 @@ export async function startServer(listenPort = PORT): Promise<{
       if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
       if (existing.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
       const updated = await riderFinalOffer(sql, id, paise as never);
+      // Record the rider's platform contribution before any finalize reads it.
       await sql.query("UPDATE negotiations SET platform_fee=$2 WHERE id=$1", [id, platformFeePaise]);
       await sql.query("UPDATE ride_requests SET platform_fee=$2 WHERE id=$1", [updated.request_id, platformFeePaise]);
+      if (updated.state === "AGREED") {
+        // final ≥ driver's counter carries accept semantics — the claiming driver
+        // wins the trip; never rebroadcast an already-agreed negotiation.
+        const driverId = claimedDriver(updated.request_id);
+        if (!driverId) fail(409, "NO_DRIVER", "countering driver unavailable");
+        const trip = await finalizeAgreement(updated.request_id, updated.id, driverId);
+        return { state: updated.state, round: updated.round, platformFeePaise, tripId: trip.tripId };
+      }
       const rr = (
         await sql.query<{ pickup_lat: number; pickup_lng: number; drop_lat: number; drop_lng: number; payment_method: string }>(
           "SELECT * FROM ride_requests WHERE id=$1",

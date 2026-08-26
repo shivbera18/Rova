@@ -831,12 +831,13 @@ export async function startServer(listenPort = PORT): Promise<{
       fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this tip");
     }
     try {
+      // Guard only real wallets — clearing is a netting account that may sit negative.
       const txn = await postTransaction(
         sql,
         [{ debitAccount: source, creditAccount: `driver:${trip.driver_id}:WALLET`, amountPaise: amountPaise!, reason: "TIP" }],
         id,
         `tip:${id}`,
-        [{ account: source, minBalancePaise: amountPaise! }],
+        trip.payment_method === "WALLET" ? [{ account: source, minBalancePaise: amountPaise! }] : [],
       );
       const fare = readFareJson(trip.fare_json);
       fare.tipPaise = amountPaise!;

@@ -354,7 +354,7 @@ export async function startServer(listenPort = PORT): Promise<{
     }
     const clean = (s: string | undefined): string | null =>
       typeof s === "string"
-        ? s.replace(/[ -­]/g, "").trim().slice(0, 200) || null
+        ? s.replace(/[\u0000-\u001f\u007f\u00ad]/g, "").trim().slice(0, 200) || null
         : null;
     const negotiated = typeof body.offerPaise === "number";
     const platformContribution = negotiated ? (body.platformFeePaise ?? payload.pf) : payload.pf;

@@ -628,6 +628,10 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!Number.isSafeInteger(platformFeePaise) || platformFeePaise! < 0) {
       fail(400, "BAD_BODY", "non-negative platform contribution required");
     }
+    // Same fraud ceiling creation enforces (security.validateRideRequest).
+    if (platformFeePaise! > 1_000_000) {
+      fail(400, "PLATFORM_FEE_TOO_HIGH", "Platform contribution exceeds ₹10,000 fraud limit");
+    }
     try {
       const existing = await getNegotiation(sql, id);
       if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
@@ -644,6 +648,19 @@ export async function startServer(listenPort = PORT): Promise<{
       if (updated.state === "AGREED") {
         // final ≥ driver's counter carries accept semantics — the claiming driver
         // wins the trip; never rebroadcast an already-agreed negotiation.
+        // The creation-time wallet check is stale by now — re-verify against the
+        // final negotiated total before settlement can overdraw it.
+        const payRow = (
+          await sql.query<{ payment_method: string }>(
+            "SELECT payment_method FROM ride_requests WHERE id=$1",
+            [updated.request_id],
+          )
+        ).rows[0];
+        if (payRow?.payment_method === "WALLET") {
+          const due = updated.current_offer + platformFeePaise!;
+          const bal = await walletBalance(sql, `user:${sess.userId}:WALLET`);
+          if (bal < due) fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this fare");
+        }
         const trip = await finalizeAgreement(updated.request_id, updated.id, claimed);
         return { state: updated.state, round: updated.round, platformFeePaise, tripId: trip.tripId };
       }

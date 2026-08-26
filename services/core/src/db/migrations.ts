@@ -167,6 +167,9 @@ export const MIGRATIONS = [
       created_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (rider_id, driver_id)
     );
+
+    -- "ride again" requests route to exactly this driver instead of broadcasting
+    ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS requested_driver_id uuid REFERENCES users(id);
     `,
   },
 ];

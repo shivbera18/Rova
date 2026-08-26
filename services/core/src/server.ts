@@ -347,6 +347,7 @@ export async function startServer(listenPort = PORT): Promise<{
       drop?: LatLon;
       pickupLabel?: string;
       dropLabel?: string;
+      driverId?: string;
     };
     const payload = body.quoteToken ? verifyQuoteToken(body.quoteToken) : null;
     if (!payload || !body.vehicleClass || !body.paymentMethod || !body.pickup || !body.drop) {
@@ -356,6 +357,28 @@ export async function startServer(listenPort = PORT): Promise<{
       typeof s === "string"
         ? s.replace(/[\u0000-\u001f\u007f\u00ad]/g, "").trim().slice(0, 200) || null
         : null;
+    // Direct-to-driver ("ride again") requests skip the open auction.
+    let requestedDriverId: string | null = null;
+    if (body.driverId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.driverId)) {
+        fail(400, "BAD_BODY", "bad driverId");
+      }
+      const prof = (
+        await sql.query<{ kyc_status: string; vehicle_class: string }>(
+          "SELECT kyc_status, vehicle_class FROM driver_profiles WHERE user_id=$1",
+          [body.driverId],
+        )
+      ).rows[0];
+      if (!prof || prof.kyc_status !== "APPROVED") fail(404, "DRIVER_UNAVAILABLE", "driver is not available");
+      if (prof.vehicle_class !== body.vehicleClass!) {
+        fail(400, "CLASS_MISMATCH", "favourite driver drives a different vehicle class");
+      }
+      const live = getLiveDriver(body.driverId);
+      if (!live || !live.online || live.onTrip) {
+        fail(409, "DRIVER_UNAVAILABLE", "favourite driver is offline right now");
+      }
+      requestedDriverId = body.driverId;
+    }
     const negotiated = typeof body.offerPaise === "number";
     const platformContribution = negotiated ? (body.platformFeePaise ?? payload.pf) : payload.pf;
     if (negotiated && (!Number.isSafeInteger(body.offerPaise) || body.offerPaise! < 0)) {

@@ -1103,26 +1103,38 @@ export async function startServer(listenPort = PORT): Promise<{
   app.put("/v1/drivers/:id/favorite", async (req) => {
     const sess = requireRider(await session(req));
     const { id } = req.params as { id: string };
+    enforceRateLimit(`fav:${sess.userId}`, 30, 60_000);
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
       fail(400, "BAD_BODY", "driver id required");
     }
     if (id === sess.userId) fail(400, "BAD_BODY", "cannot favourite yourself");
     const target = await sql.query<{ role: string }>("SELECT role FROM users WHERE id=$1", [id]);
     if (target.rows[0]?.role !== "DRIVER") fail(404, "NOT_FOUND", "no such driver");
-    const existing = await sql.query(
-      "SELECT 1 FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2",
+    // Single conditional insert: the cap is enforced atomically with the write,
+    // so concurrent favourites for different drivers cannot exceed ten.
+    const ins = await sql.query(
+      `INSERT INTO favorite_drivers (rider_id, driver_id)
+       SELECT $1, $2
+       WHERE (SELECT COUNT(*) FROM favorite_drivers WHERE rider_id=$1) < 10
+       ON CONFLICT DO NOTHING`,
       [sess.userId, id],
     );
-    if (existing.rows.length > 0) return { ok: true, duplicate: true };
-    const count = await sql.query<{ n: string }>(
-      "SELECT COUNT(*)::text AS n FROM favorite_drivers WHERE rider_id=$1",
-      [sess.userId],
-    );
-    if (Number(count.rows[0]?.n ?? 0) >= 10) fail(409, "FAVORITE_LIMIT", "up to 10 favourite drivers");
-    await sql.query(
-      "INSERT INTO favorite_drivers (rider_id, driver_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
-      [sess.userId, id],
-    );
+    if (ins.rows.length === 0) {
+      const now = await sql.query(
+        "SELECT 1 FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2",
+        [sess.userId, id],
+      );
+      if (now.rows.length === 0) fail(409, "FAVORITE_LIMIT", "up to 10 favourite drivers");
+      return { ok: true, duplicate: true };
+    }
+    return { ok: true };
+  });
+
+  app.delete("/v1/drivers/:id/favorite", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    enforceRateLimit(`fav:${sess.userId}`, 30, 60_000);
+    await sql.query("DELETE FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2", [sess.userId, id]);
     return { ok: true };
   });
 

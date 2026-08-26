@@ -102,7 +102,18 @@ export async function createTripFromAgreement(
       JSON.stringify(fare),
     ],
   );
-  await sql.query("UPDATE ride_requests SET state='AGREED', version=version+1 WHERE id=$1", [params.requestId]);
+  // RETURNING keeps the affected-row signal honest across pg and PGlite
+  // (the embedded wrapper derives rowCount from rows.length).
+  const retired = await sql.query<{ id: string }>(
+    "UPDATE ride_requests SET state='AGREED', version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING') RETURNING id",
+    [params.requestId],
+  );
+  if (retired.rows.length === 0) {
+    // The request was cancelled/superseded mid-agreement; never mark a dead
+    // request AGREED behind the rider's back.
+    releaseClaim(params.requestId);
+    throw new TripError("REQUEST_NOT_OPEN", "ride request was cancelled or superseded before agreement");
+  }
   await sql.query(
     "INSERT INTO otp_codes (trip_id, code_hash, expires_at) VALUES ($1,$2,$3)",
     [id, hashOtp(id, otp), new Date(Date.now() + 6 * 3600_000)],

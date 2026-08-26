@@ -265,6 +265,7 @@ export async function startServer(listenPort = PORT): Promise<{
     return { ticket, expiresIn: 60 };
   });
   app.post("/v1/quotes", async (req) => {
+    requireRider(await session(req));
     const body = req.body as { pickup?: LatLon; drop?: LatLon; vehicleClasses?: VehicleClass[] };
     if (!body.pickup || !body.drop) fail(400, "BAD_BODY", "pickup and drop required");
     const classes = body.vehicleClasses ?? [...VEHICLE_CLASSES];
@@ -395,7 +396,7 @@ export async function startServer(listenPort = PORT): Promise<{
     let negotiationId: string | undefined;
     let expiresAt: Date;
     if (negotiated) {
-      const neg = await createNegotiation(
+      const { negotiation, supersededRequestIds } = await createNegotiation(
         sql,
         requestId,
         sess.userId,
@@ -406,8 +407,12 @@ export async function startServer(listenPort = PORT): Promise<{
         platformContribution as never,
         body.paymentMethod!,
       );
-      negotiationId = neg.id;
-      expiresAt = new Date(neg.expires_at);
+      for (const reqId of supersededRequestIds) {
+        releaseClaim(reqId);
+        void cancelBroadcast(reqId);
+      }
+      negotiationId = negotiation.id;
+      expiresAt = new Date(negotiation.expires_at);
     } else {
       expiresAt = new Date(Date.now() + 90_000);
     }
@@ -570,6 +575,12 @@ export async function startServer(listenPort = PORT): Promise<{
         fail(409, "ALREADY_CLAIMED", "another driver is countering");
       }
       const updated = await driverCounter(sql, id, sess.userId, paise as never);
+      if (updated.state === "AGREED") {
+        // counter ≤ rider's offer carries accept semantics — create the trip now
+        // instead of leaking an AGREED negotiation with a permanently held claim.
+        const trip = await finalizeAgreement(updated.request_id, updated.id, sess.userId);
+        return { state: updated.state, round: updated.round, tripId: trip.tripId };
+      }
       pushRider(neg0.rider_id, {
         t: "negotiation.counter",
         negotiationId: updated.id,
@@ -597,10 +608,12 @@ export async function startServer(listenPort = PORT): Promise<{
       const existing = await getNegotiation(sql, id);
       if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
       if (existing.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
+      // Fail while the negotiation is still COUNTERED_DRIVER (recoverable):
+      // committing AGREED without a live driver claim would wedge it forever.
+      const claimed = claimedDriver(existing.request_id);
+      if (claimed === null) fail(409, "NO_DRIVER", "no countering driver to settle with");
       const neg = await riderAcceptCounter(sql, id);
-      const driverId = claimedDriver(neg.request_id);
-      if (!driverId) fail(409, "NO_DRIVER", "countering driver unavailable");
-      const trip = await finalizeAgreement(neg.request_id, neg.id, driverId);
+      const trip = await finalizeAgreement(neg.request_id, neg.id, claimed);
       return { tripId: trip.tripId };
     } catch (err) {
       if (err instanceof NegotationError) fail(409, err.code, err.message);
@@ -616,13 +629,42 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!Number.isSafeInteger(platformFeePaise) || platformFeePaise! < 0) {
       fail(400, "BAD_BODY", "non-negative platform contribution required");
     }
+    // Same fraud ceiling creation enforces (security.validateRideRequest).
+    if (platformFeePaise! > 1_000_000) {
+      fail(400, "PLATFORM_FEE_TOO_HIGH", "Platform contribution exceeds ₹10,000 fraud limit");
+    }
     try {
       const existing = await getNegotiation(sql, id);
       if (!existing) fail(404, "NOT_FOUND", "no such negotiation");
       if (existing.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your negotiation");
+      // Fail while the negotiation is still COUNTERED_DRIVER (recoverable):
+      // riderFinalOffer may commit AGREED, which must never happen without a
+      // live driver claim to finalize against.
+      const claimed = claimedDriver(existing.request_id);
+      if (claimed === null) fail(409, "NO_DRIVER", "no countering driver to settle with");
       const updated = await riderFinalOffer(sql, id, paise as never);
+      // Record the rider's platform contribution before any finalize reads it.
       await sql.query("UPDATE negotiations SET platform_fee=$2 WHERE id=$1", [id, platformFeePaise]);
       await sql.query("UPDATE ride_requests SET platform_fee=$2 WHERE id=$1", [updated.request_id, platformFeePaise]);
+      if (updated.state === "AGREED") {
+        // final ≥ driver's counter carries accept semantics — the claiming driver
+        // wins the trip; never rebroadcast an already-agreed negotiation.
+        // The creation-time wallet check is stale by now — re-verify against the
+        // final negotiated total before settlement can overdraw it.
+        const payRow = (
+          await sql.query<{ payment_method: string }>(
+            "SELECT payment_method FROM ride_requests WHERE id=$1",
+            [updated.request_id],
+          )
+        ).rows[0];
+        if (payRow?.payment_method === "WALLET") {
+          const due = updated.current_offer + platformFeePaise!;
+          const bal = await walletBalance(sql, `user:${sess.userId}:WALLET`);
+          if (bal < due) fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this fare");
+        }
+        const trip = await finalizeAgreement(updated.request_id, updated.id, claimed);
+        return { state: updated.state, round: updated.round, platformFeePaise, tripId: trip.tripId };
+      }
       const rr = (
         await sql.query<{ pickup_lat: number; pickup_lng: number; drop_lat: number; drop_lng: number; payment_method: string }>(
           "SELECT * FROM ride_requests WHERE id=$1",
@@ -851,6 +893,7 @@ export async function startServer(listenPort = PORT): Promise<{
     } else if (existing !== driverId) {
       fail(409, "ALREADY_CLAIMED", "another driver won this ride");
     }
+    void cancelBroadcast(requestId);
 
     const rr = (
       await sql.query<{
@@ -924,6 +967,21 @@ export async function startServer(listenPort = PORT): Promise<{
     return { tripId: trip.id, otp };
   }
 
+  /** Relay a validated driver position to the rider of their active trip (protocol `trip.location`). */
+  async function relayPositionToRider(driverId: string, lat: number, lng: number): Promise<void> {
+    const active = await sql.query<{ rider_id: string }>(
+      // trips has no created_at; ended_at DESC NULLS FIRST rides idx_trips_driver
+      // and prefers never-ended (active) rows when a driver holds several.
+      `SELECT rider_id FROM trips
+       WHERE driver_id=$1 AND state IN ('DRIVER_ASSIGNED','ARRIVING','ARRIVED','ONGOING')
+       ORDER BY ended_at DESC NULLS FIRST
+       LIMIT 1`,
+      [driverId],
+    );
+    const row = active.rows[0];
+    if (row) pushRider(row.rider_id, { t: "trip.location", lat, lng });
+  }
+
   // ---- websockets -------------------------------------------------------------------
 
   app.get("/ws/rider", { websocket: true }, (socket, req) => {
@@ -986,6 +1044,7 @@ export async function startServer(listenPort = PORT): Promise<{
             validateDriverGps(sess.userId, { lat: msg.lat, lng: msg.lng });
             setDriverPos(sess.userId, { lat: msg.lat, lng: msg.lng });
             void sql.query("UPDATE driver_profiles SET last_lat=$2,last_lng=$3 WHERE user_id=$1", [sess.userId, msg.lat, msg.lng]);
+            void relayPositionToRider(sess.userId, msg.lat, msg.lng);
           } catch (err) { logger.warn("FRAUD", `Rejected driver GPS update user=${sess.userId.slice(0, 8)}`, err); }
         }
       });

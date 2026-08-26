@@ -30,6 +30,7 @@ import {
   cancelMatchedTrip,
   cancelRequest,
   getTrip,
+  getToken,
   getWallet,
   listTrips,
   rateTrip,
@@ -250,9 +251,13 @@ export default function Book(): React.ReactElement {
   }, [phase.k, phase.k === "trip" ? phase.trip.id : null]);
 
   async function fetchQuotes(a: LatLon, b: LatLon): Promise<Quote[]> {
+    const token = getToken();
     const res = await fetch("/v1/quotes", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ pickup: a, drop: b }),
     });
     const json = (await res.json()) as { quotes?: Quote[]; message?: string };

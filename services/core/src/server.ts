@@ -689,8 +689,16 @@ export async function startServer(listenPort = PORT): Promise<{
         return { state: updated.state, round: updated.round, platformFeePaise, tripId: trip.tripId };
       }
       const rr = (
-        await sql.query<{ pickup_lat: number; pickup_lng: number; drop_lat: number; drop_lng: number; payment_method: string }>(
-          "SELECT * FROM ride_requests WHERE id=$1",
+        await sql.query<{
+          pickup_lat: number;
+          pickup_lng: number;
+          drop_lat: number;
+          drop_lng: number;
+          payment_method: string;
+          pickup_label: string | null;
+          drop_label: string | null;
+        }>(
+          "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng, payment_method, pickup_label, drop_label FROM ride_requests WHERE id=$1",
           [updated.request_id],
         )
       ).rows[0]!;
@@ -700,8 +708,8 @@ export async function startServer(listenPort = PORT): Promise<{
         takeHomePaise: updated.current_offer,
         pickup: { lat: rr.pickup_lat, lng: rr.pickup_lng },
         drop: { lat: rr.drop_lat, lng: rr.drop_lng },
-        pickupLabel: (rr as Record<string, unknown>).pickup_label as string | null,
-        dropLabel: (rr as Record<string, unknown>).drop_label as string | null,
+        pickupLabel: rr.pickup_label,
+        dropLabel: rr.drop_label,
         expiresAt: new Date(updated.expires_at).toISOString(),
         round: updated.round,
         isCounter: true,
@@ -1228,7 +1236,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = requireAuth(await session(req));
     const col = sess.role === "RIDER" ? "rider_id" : "driver_id";
     const rows = await sql.query<TripRow & Record<string, unknown>>(
-      `SELECT t.*, r.payment_method FROM trips t
+      `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label FROM trips t
        JOIN ride_requests r ON r.id=t.request_id
        WHERE t.${col}=$1 ORDER BY r.created_at DESC LIMIT 50`,
       [sess.userId],

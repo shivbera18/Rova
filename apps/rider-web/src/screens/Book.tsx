@@ -59,15 +59,18 @@ function SaveDriverButton({
   driverId,
   driverName,
   onError,
+  onSaved,
 }: {
   driverId: string;
   driverName: string;
   onError: (msg: string) => void;
+  onSaved?: () => void;
 }): React.ReactElement {
   const [saved, setSaved] = useState(false);
+  const first = (driverName || "Driver").split(" ")[0] || "Driver";
   return saved ? (
     <div className="ok-text">
-      <CircleCheck size={14} /> {driverName.split(" ")[0]} saved — find them under “Ride again”
+      <CircleCheck size={14} /> {first} saved — find them under “Ride again”
     </div>
   ) : (
     <NeoButton
@@ -75,11 +78,14 @@ function SaveDriverButton({
       size="sm"
       onClick={() => {
         void toggleFavorite(driverId, true)
-          .then(() => setSaved(true))
+          .then(() => {
+            setSaved(true);
+            onSaved?.();
+          })
           .catch(() => onError("Could not save driver"));
       }}
     >
-      <Heart size={14} /> Save {driverName.split(" ")[0]} for next time
+      <Heart size={14} /> Save {first} for next time
     </NeoButton>
   );
 }
@@ -623,7 +629,7 @@ export default function Book(): React.ReactElement {
                       onClick={() => setFavDriver((cur) => (cur?.id === f.id ? null : f))}
                     >
                       <Heart size={14} fill={favDriver?.id === f.id ? "currentColor" : "none"} />
-                      <small>{`${(f.name || "Driver").split(" ")[0]} · ${(f.vehicleClass ?? "").replaceAll("_", " ")}`}</small>
+                      <small>{`${(f.name || "Driver").split(" ")[0] || "Driver"} · ${vehicleLabel(f.vehicleClass ?? "BIKE")}`}</small>
                     </button>
                   ))}
                 </div>
@@ -945,6 +951,11 @@ export default function Book(): React.ReactElement {
                   driverId={phase.trip.driverId}
                   driverName={phase.trip.driverName ?? "this driver"}
                   onError={setError}
+                  onSaved={() => {
+                    void getFavorites()
+                      .then((res) => setFavorites(res.favorites))
+                      .catch(() => undefined);
+                  }}
                 />
               </div>
             )}

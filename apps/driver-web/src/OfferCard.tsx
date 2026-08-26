@@ -161,7 +161,7 @@ export function OfferCard({
               className="row"
               style={{
                 gap: 4,
-                color: "#ffffff",
+                color: "#fff",
                 background: "var(--primary)",
                 fontWeight: 800,
                 padding: "1px 8px",

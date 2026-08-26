@@ -739,10 +739,24 @@ async function runVerification(): Promise<void> {
       [ghostUser.id],
     );
     assert((ghostProfile?.rowCount ?? 0) === 1 || (ghostProfile?.rows.length ?? 0) === 1, "Offline rival driver seeded");
+
     const quotes2 = await api("/v1/quotes", { pickup, drop }, riderToken);
-    const bike2 = quotes2.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+    const bike2b = quotes2.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+
+    // non-favourited drivers cannot be targeted directly
+    const notFav = await api("/v1/requests", {
+      quoteToken: bike2b.quoteToken,
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+      driverId: rivalUser.id,
+    }, riderToken);
+    assert(notFav.status === 403 && notFav.json.code === "NOT_A_FAVOURITE", "Direct requests require a saved favourite");
+
+    await favFetch(ghostUser.id, "PUT");
     const offlineRes = await api("/v1/requests", {
-      quoteToken: bike2.quoteToken,
+      quoteToken: bike2b.quoteToken,
       vehicleClass: "BIKE",
       paymentMethod: "UPI",
       pickup,
@@ -751,8 +765,36 @@ async function runVerification(): Promise<void> {
     }, riderToken);
     assert(offlineRes.status === 409 && offlineRes.json.code === "DRIVER_UNAVAILABLE", "Offline favourite rejected fast with DRIVER_UNAVAILABLE");
 
+    // negotiated direct request: targeting must survive counter/final re-fanouts
+    const nq = await api("/v1/quotes", { pickup, drop }, riderToken);
+    const nBike = nq.json.quotes.find((q: any) => q.vehicleClass === "BIKE");
+    const riderCounterWaiter = riderWs.waitFor((m) => m.t === "negotiation.counter");
+    const nReq = await api("/v1/requests", {
+      quoteToken: nBike.quoteToken,
+      offerPaise: Math.round(nBike.listPrice * 0.6),
+      vehicleClass: "BIKE",
+      paymentMethod: "UPI",
+      pickup,
+      drop,
+      driverId,
+    }, riderToken);
+    assert(nReq.status === 200 && nReq.json.mode === "NEGOTIATED", "Negotiated direct request created");
+    assert(nReq.json.deliveredToDrivers === 1, "Direct negotiation delivered to exactly one driver");
+
+    await api(`/v1/negotiations/${nReq.json.negotiationId}/counter`, { paise: Math.round(nBike.listPrice * 0.75) }, driverToken);
+    await riderCounterWaiter;
+    // rider final BELOW the counter -> COUNTERED_RIDER state -> rebroadcast
+    const finalRes = await api(`/v1/negotiations/${nReq.json.negotiationId}/final`, { paise: Math.round(nBike.listPrice * 0.65), platformFeePaise: 125 }, riderToken);
+    assert(finalRes.status === 200 && finalRes.json.state === "COUNTERED_RIDER", "Rider final offer recorded for direct negotiation");
+    const rivalLeak2 = await rivalWs
+      .waitFor((m: any) => m.t === "dispatch.offer" && m.offer.requestId === nReq.json.sessionId, 1500)
+      .then(() => true)
+      .catch(() => false);
+    assert(rivalLeak2 === false, "Rival driver did not receive the targeted re-fanout");
+
     // cleanup: unfavourite + close rival socket
     await favFetch(driverId, "DELETE").catch(() => undefined);
+    await api(`/v1/requests/${nReq.json.sessionId}/cancel`, {}, riderToken).catch(() => undefined);
     await api(`/v1/requests/${reqRes.json.sessionId}/cancel`, {}, riderToken).catch(() => undefined);
     rivalWs.close();
   }

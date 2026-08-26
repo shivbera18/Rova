@@ -344,11 +344,15 @@ export async function startServer(listenPort = PORT): Promise<{
       paymentMethod?: "WALLET" | "UPI" | "CASH";
       pickup?: LatLon;
       drop?: LatLon;
+      pickupLabel?: string;
+      dropLabel?: string;
     };
     const payload = body.quoteToken ? verifyQuoteToken(body.quoteToken) : null;
     if (!payload || !body.vehicleClass || !body.paymentMethod || !body.pickup || !body.drop) {
       fail(400, "BAD_BODY", "quoteToken, vehicleClass, paymentMethod, pickup, drop required");
     }
+    const clean = (s: string | undefined): string | null =>
+      typeof s === "string" ? s.trim().slice(0, 200) || null : null;
     const negotiated = typeof body.offerPaise === "number";
     const platformContribution = negotiated ? (body.platformFeePaise ?? payload.pf) : payload.pf;
     if (negotiated && (!Number.isSafeInteger(body.offerPaise) || body.offerPaise! < 0)) {
@@ -382,8 +386,9 @@ export async function startServer(listenPort = PORT): Promise<{
     await sql.query(
       `INSERT INTO ride_requests
          (id, rider_id, city_id, vehicle_class, mode, state, payment_method,
-          pickup_lat, pickup_lng, drop_lat, drop_lng, list_price, platform_fee)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          pickup_lat, pickup_lng, drop_lat, drop_lng, list_price, platform_fee,
+          pickup_label, drop_label)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         requestId,
         sess.userId,
@@ -398,6 +403,8 @@ export async function startServer(listenPort = PORT): Promise<{
         body.drop!.lng,
         payload!.lp,
         platformContribution,
+        clean(body.pickupLabel),
+        clean(body.dropLabel),
       ],
     );
 
@@ -431,6 +438,8 @@ export async function startServer(listenPort = PORT): Promise<{
       takeHomePaise: negotiated ? body.offerPaise! : payload!.tf,
       pickup: body.pickup!,
       drop: body.drop!,
+      pickupLabel: clean(body.pickupLabel),
+      dropLabel: clean(body.dropLabel),
       expiresAt: expiresAt.toISOString(),
       round: 1,
       isCounter: false,
@@ -460,6 +469,8 @@ export async function startServer(listenPort = PORT): Promise<{
     takeHomePaise: number;
     pickup: LatLon;
     drop: LatLon;
+    pickupLabel?: string | null;
+    dropLabel?: string | null;
     expiresAt: string;
     round: number;
     isCounter: boolean;
@@ -483,6 +494,8 @@ export async function startServer(listenPort = PORT): Promise<{
       takeHomePaise: o.takeHomePaise as never,
       pickup: o.pickup,
       drop: o.drop,
+      pickupLabel: o.pickupLabel ?? null,
+      dropLabel: o.dropLabel ?? null,
       tripKm: km,
       expiresAt: o.expiresAt,
       round: o.round,
@@ -687,6 +700,8 @@ export async function startServer(listenPort = PORT): Promise<{
         takeHomePaise: updated.current_offer,
         pickup: { lat: rr.pickup_lat, lng: rr.pickup_lng },
         drop: { lat: rr.drop_lat, lng: rr.drop_lng },
+        pickupLabel: (rr as Record<string, unknown>).pickup_label as string | null,
+        dropLabel: (rr as Record<string, unknown>).drop_label as string | null,
         expiresAt: new Date(updated.expires_at).toISOString(),
         round: updated.round,
         isCounter: true,
@@ -886,6 +901,8 @@ export async function startServer(listenPort = PORT): Promise<{
       vehicleClass: trip.vehicle_class,
       pickup: { lat: trip.pickup_lat, lng: trip.pickup_lng },
       drop: { lat: trip.drop_lat, lng: trip.drop_lng },
+      pickupLabel: trip.pickup_label ?? undefined,
+      dropLabel: trip.drop_label ?? undefined,
       fareBreakdown: fare,
       paymentMethod: trip.payment_method ?? "UPI",
       startedAt: trip.started_at ? new Date(trip.started_at).toISOString() : undefined,

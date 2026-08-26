@@ -103,6 +103,9 @@ export interface TripRow {
   ended_at: Date | null;
   version: number;
   payment_method?: "WALLET" | "UPI" | "CASH";
+  /** joined from ride_requests for display */
+  pickup_label?: string | null;
+  drop_label?: string | null;
 }
 
 export type LedgerReason =

@@ -573,6 +573,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const { id } = req.params as { id: string };
     const { paise } = req.body as { paise?: number };
     if (!Number.isSafeInteger(paise) || paise! < 0) fail(400, "BAD_BODY", "non-negative paise required");
+    if (paise! > 10_000_000) fail(400, "OFFER_TOO_HIGH", "Driver ask exceeds ₹1,00,000 fraud limit");
     try {
       const neg0 = await getNegotiation(sql, id);
       if (!neg0) fail(404, "NOT_FOUND", "no such negotiation");
@@ -632,6 +633,7 @@ export async function startServer(listenPort = PORT): Promise<{
     const { id } = req.params as { id: string };
     const { paise, platformFeePaise } = req.body as { paise?: number; platformFeePaise?: number };
     if (!Number.isSafeInteger(paise) || paise! < 0) fail(400, "BAD_BODY", "non-negative driver paise required");
+    if (paise! > 10_000_000) fail(400, "OFFER_TOO_HIGH", "Final offer exceeds ₹1,00,000 fraud limit");
     if (!Number.isSafeInteger(platformFeePaise) || platformFeePaise! < 0) {
       fail(400, "BAD_BODY", "non-negative platform contribution required");
     }

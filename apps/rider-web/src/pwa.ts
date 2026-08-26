@@ -55,6 +55,13 @@ export function registerPwa(appName: string): void {
   });
 
   void navigator.serviceWorker.register("/sw.js").then((registration) => {
+    // A worker may already be waiting from a previous session's failed or
+    // skipped update — updatefound never fires for it again, so surface the
+    // toast immediately.
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      waitingWorker = registration.waiting;
+      showUpdateToast(appName);
+    }
     registration.addEventListener("updatefound", () => {
       const worker = registration.installing;
       if (!worker) return;
@@ -84,8 +91,12 @@ let waitingWorker: ServiceWorker | null = null;
 
 function applyUpdate(): void {
   updateRequested = true;
-  if (waitingWorker) {
-    waitingWorker.postMessage({ type: "SKIP_WAITING" });
+  if (waitingWorker && waitingWorker.state !== "redundant") {
+    try {
+      waitingWorker.postMessage({ type: "SKIP_WAITING" });
+    } catch {
+      /* superseded mid-click — the reload below resolves it */
+    }
     // Safety net: if activation stalls for any reason, force the reload — the
     // waiting worker activates as soon as this tab drops control anyway.
     setTimeout(() => location.reload(), 3000);

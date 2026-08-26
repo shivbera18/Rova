@@ -239,6 +239,11 @@ export async function startServer(listenPort = PORT): Promise<{
       if (process.env.NODE_ENV === "production") {
         fail(503, "OTP_UNAVAILABLE", "OTP delivery is not configured for this environment");
       }
+      // Detailed remediation only for explicit development — staging/unset
+      // deployments should not leak internal paths to end users.
+      if (process.env.NODE_ENV !== "development") {
+        fail(503, "OTP_UNAVAILABLE", "OTP delivery is not configured for this environment");
+      }
       fail(
         503,
         "OTP_UNAVAILABLE",

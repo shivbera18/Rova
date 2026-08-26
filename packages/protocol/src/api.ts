@@ -40,6 +40,8 @@ export interface CreateRequest {
   platformFeePaise?: Paise; // rider's negotiated platform contribution (₹0 allowed)
   vehicleClass: VehicleClass;
   paymentMethod: PaymentMethod;
+  pickupLabel?: string;     // human-readable place names shown to drivers
+  dropLabel?: string;
 }
 
 export interface RequestSession {
@@ -72,6 +74,8 @@ export interface DriverOfferPayload {
   riderRating: number;
   pickup: LatLon;
   drop: LatLon;
+  pickupLabel?: string;
+  dropLabel?: string;
   paymentMethod: PaymentMethod;
 }
 
@@ -98,6 +102,8 @@ export interface TripView {
   drop: LatLon;
   otp?: string;             // only ever delivered to the rider + assigned driver
   fareBreakdown: FareBreakdown;
+  pickupLabel?: string;
+  dropLabel?: string;
   driverName?: string;
   driverPlate?: string;
   driverRating?: number;

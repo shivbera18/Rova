@@ -1,4 +1,19 @@
 import { useState } from "react";
+import {
+  ArrowDown,
+  ArrowRight,
+  Bike,
+  Car,
+  CarFront,
+  CarTaxiFront,
+  KeyRound,
+  MapPin,
+  Menu,
+  Rocket,
+  ShieldCheck,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { NeoButton, NeoCard, NeoBadge, NeoAccordion, NeoMarquee } from "./NeoComponents";
 
 export function Landing({
@@ -122,7 +137,9 @@ export function Landing({
                 size="sm"
                 onClick={onSwitchPortal}
               >
-                {isRider ? "🛵 Driver Portal" : "🚗 Rider Portal"}
+                {isRider
+                  ? <><Bike size={14} /> Driver Portal</>
+                  : <><CarFront size={14} /> Rider Portal</>}
               </NeoButton>
             )}
             <NeoButton
@@ -141,7 +158,7 @@ export function Landing({
             onClick={() => setMobileMenuOpen((prev) => !prev)}
             aria-label="Toggle menu"
           >
-            {mobileMenuOpen ? "✕" : "☰"}
+            {mobileMenuOpen ? <X size={15} /> : <Menu size={15} />}
           </button>
         </div>
 
@@ -179,7 +196,9 @@ export function Landing({
                   onSwitchPortal();
                 }}
               >
-                {isRider ? "🛵 Driver Portal" : "🚗 Rider Portal"}
+                {isRider
+                  ? <><Bike size={14} /> Driver Portal</>
+                  : <><CarFront size={14} /> Rider Portal</>}
               </NeoButton>
             )}
             <NeoButton
@@ -199,7 +218,7 @@ export function Landing({
       {/* ============ PRE-BUILT NEOMARQUEE ============ */}
       <NeoMarquee
         items={[
-          "⚡ You set the price",
+          "You set the price",
           "Transparent Platform Fee",
           "Drivers keep 100% of deal",
           "Bikes · Autos · Cabs",
@@ -223,7 +242,7 @@ export function Landing({
       >
         <div style={{ flex: "1 1 480px", maxWidth: 640 }}>
           <NeoBadge variant="primary" style={{ marginBottom: 18, display: "inline-flex" }}>
-            ✨ India's Open Fair-Price Ride Marketplace
+            <Sparkles size={13} /> India's Open Fair-Price Ride Marketplace
           </NeoBadge>
 
           <h1 style={{ fontSize: "clamp(38px, 5.5vw, 64px)", lineHeight: 1.05, margin: "14px 0 20px" }}>
@@ -256,22 +275,22 @@ export function Landing({
               onClick={onGetStarted}
               style={{ boxShadow: "var(--shadow-md)" }}
             >
-              🚀 Book Your Ride Now
+              <Rocket size={16} /> Book Your Ride Now
             </NeoButton>
             <a
               href="#calculator"
               className="brut-btn brut-btn-white"
               style={{ fontSize: 15, padding: "13px 22px" }}
             >
-              Try Fair Calculator ↓
+              Try Fair Calculator <ArrowDown size={15} />
             </a>
           </div>
 
           <div className="row" style={{ gap: 8, marginTop: 32, flexWrap: "wrap" }}>
-            <NeoBadge>🏍️ Bike Quick Rides</NeoBadge>
-            <NeoBadge>🛺 Auto Rickshaws</NeoBadge>
-            <NeoBadge>🚗 Prime Cabs</NeoBadge>
-            <NeoBadge variant="green">🛡️ Start OTP Verified</NeoBadge>
+            <NeoBadge><Bike size={12} /> Bike Quick Rides</NeoBadge>
+            <NeoBadge><CarTaxiFront size={12} /> Auto Rickshaws</NeoBadge>
+            <NeoBadge><Car size={12} /> Prime Cabs</NeoBadge>
+            <NeoBadge variant="green"><ShieldCheck size={12} /> Start OTP Verified</NeoBadge>
           </div>
         </div>
 
@@ -279,7 +298,7 @@ export function Landing({
         <div style={{ flex: "0 1 360px", width: "100%", margin: "0 auto" }}>
           <NeoCard elevation="lg" style={{ padding: 24, borderRadius: "var(--radius-lg)" }}>
             <div className="spread" style={{ marginBottom: 14 }}>
-              <NeoBadge variant="green">● LIVE TRIP BIDDING</NeoBadge>
+              <NeoBadge variant="green">LIVE TRIP BIDDING</NeoBadge>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-muted)" }}>BENGALURU</span>
             </div>
 
@@ -291,35 +310,41 @@ export function Landing({
                 ₹65 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-soft)" }}>+ ₹10 fee</span>
               </div>
               <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
-                Route: Koramangala ➔ Indiranagar · 4.8 km
+                Route: Koramangala → Indiranagar · 4.8 km
               </div>
             </NeoCard>
 
             <div className="col" style={{ gap: 8 }}>
               {[
-                { type: "🏍️ Bike Taxi", eta: "3 min away", bid: "₹65 (Accepted)", badgeVariant: "green" as const },
-                { type: "🛺 Auto Meter", eta: "5 min away", bid: "Counter: ₹75", badgeVariant: "primary" as const },
-                { type: "🚗 Prime Cab", eta: "6 min away", bid: "Counter: ₹90", badgeVariant: "primary" as const },
-              ].map((item) => (
-                <div
-                  key={item.type}
-                  className="spread"
-                  style={{
-                    padding: "10px 12px",
-                    border: "var(--brut-border-thin)",
-                    borderRadius: "var(--radius-sm)",
-                    background: "var(--paper-subtle)",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{item.type}</div>
-                    <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>{item.eta}</div>
+                { icon: Bike, name: "Bike Taxi", eta: "3 min away", bid: "₹65 (Accepted)", badgeVariant: "green" as const },
+                { icon: CarTaxiFront, name: "Auto Meter", eta: "5 min away", bid: "Counter: ₹75", badgeVariant: "primary" as const },
+                { icon: Car, name: "Prime Cab", eta: "6 min away", bid: "Counter: ₹90", badgeVariant: "primary" as const },
+              ].map((item) => {
+                const BidIcon = item.icon;
+                return (
+                  <div
+                    key={item.name}
+                    className="spread"
+                    style={{
+                      padding: "10px 12px",
+                      border: "var(--brut-border-thin)",
+                      borderRadius: "var(--radius-sm)",
+                      background: "var(--paper-subtle)",
+                    }}
+                  >
+                    <div className="row" style={{ gap: 8 }}>
+                      <BidIcon size={16} strokeWidth={2.2} />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{item.name}</div>
+                        <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>{item.eta}</div>
+                      </div>
+                    </div>
+                    <NeoBadge variant={item.badgeVariant} style={{ fontSize: 10.5 }}>
+                      {item.bid}
+                    </NeoBadge>
                   </div>
-                  <NeoBadge variant={item.badgeVariant} style={{ fontSize: 10.5 }}>
-                    {item.bid}
-                  </NeoBadge>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <NeoButton
@@ -328,7 +353,7 @@ export function Landing({
               onClick={onGetStarted}
               style={{ marginTop: 18 }}
             >
-              Try Negotiation Flow →
+              Try Negotiation Flow <ArrowRight size={15} />
             </NeoButton>
           </NeoCard>
         </div>
@@ -514,44 +539,49 @@ export function Landing({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
           {[
             {
-              icon: "🏍️",
+              icon: Bike,
               name: "Bike Taxi",
               capacity: "1 Rider",
               desc: "Beat traffic in record time. Perfect for daily quick hops and station drop-offs.",
               tag: "FASTEST",
             },
             {
-              icon: "🛺",
+              icon: CarTaxiFront,
               name: "Auto Rickshaw",
               capacity: "3 Passengers",
               desc: "The iconic Indian city ride with upfront meter pricing and direct driver bidding.",
               tag: "POPULAR",
             },
             {
-              icon: "🚗",
+              icon: Car,
               name: "Mini Cab",
               capacity: "4 Passengers",
               desc: "Air-conditioned hatchbacks for comfortable, rain-safe city travel.",
               tag: "VALUE",
             },
             {
-              icon: "🚘",
+              icon: CarFront,
               name: "Prime Sedan",
               capacity: "4 Passengers",
               desc: "Top-rated drivers and spacious sedans for airport transfers and meetings.",
               tag: "PREMIUM",
             },
-          ].map((v) => (
-            <NeoCard key={v.name} elevation="sm" style={{ padding: 22 }}>
-              <div className="spread" style={{ marginBottom: 14 }}>
-                <span style={{ fontSize: 32 }}>{v.icon}</span>
-                <NeoBadge variant="primary">{v.tag}</NeoBadge>
-              </div>
-              <h3 style={{ fontSize: 18, marginBottom: 4 }}>{v.name}</h3>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)", marginBottom: 10 }}>{v.capacity}</div>
-              <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5 }}>{v.desc}</p>
-            </NeoCard>
-          ))}
+          ].map((v) => {
+            const VehicleIcon = v.icon;
+            return (
+              <NeoCard key={v.name} elevation="sm" style={{ padding: 22 }}>
+                <div className="spread" style={{ marginBottom: 14 }}>
+                  <span style={{ color: "var(--primary)", display: "grid", placeItems: "center", width: 44, height: 44, border: "var(--brut-border-thin)", borderRadius: "var(--radius-sm)", background: "var(--primary-soft)" }}>
+                    <VehicleIcon size={26} strokeWidth={2.1} />
+                  </span>
+                  <NeoBadge variant="primary">{v.tag}</NeoBadge>
+                </div>
+                <h3 style={{ fontSize: 18, marginBottom: 4 }}>{v.name}</h3>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)", marginBottom: 10 }}>{v.capacity}</div>
+                <p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5 }}>{v.desc}</p>
+              </NeoCard>
+            );
+          })}
         </div>
       </section>
 
@@ -568,7 +598,7 @@ export function Landing({
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24 }}>
             <NeoCard elevation="sm" style={{ padding: 26 }}>
-              <div style={{ fontSize: 28, marginBottom: 12 }}>🔐</div>
+              <div style={{ color: "var(--primary)", marginBottom: 12 }}><KeyRound size={26} strokeWidth={2.1} /></div>
               <h3 style={{ fontSize: 19, marginBottom: 8 }}>Cryptographic Start OTP</h3>
               <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>
                 Every ride generates a unique salted PIN. The driver cannot start the meter until the OTP is verified by the core dispatch server.
@@ -576,7 +606,7 @@ export function Landing({
             </NeoCard>
 
             <NeoCard elevation="sm" style={{ padding: 26 }}>
-              <div style={{ fontSize: 28, marginBottom: 12 }}>📍</div>
+              <div style={{ color: "var(--primary)", marginBottom: 12 }}><MapPin size={26} strokeWidth={2.1} /></div>
               <h3 style={{ fontSize: 19, marginBottom: 8 }}>Live Telemetry & GPS Tracking</h3>
               <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>
                 Real-time driver location stream with anti-teleport checks and automated route anomaly detection throughout the journey.
@@ -584,7 +614,7 @@ export function Landing({
             </NeoCard>
 
             <NeoCard elevation="sm" style={{ padding: 26 }}>
-              <div style={{ fontSize: 28, marginBottom: 12 }}>🛡️</div>
+              <div style={{ color: "var(--green)", marginBottom: 12 }}><ShieldCheck size={26} strokeWidth={2.1} /></div>
               <h3 style={{ fontSize: 19, marginBottom: 8 }}>Verified Partner KYC</h3>
               <p style={{ color: "var(--ink-soft)", fontSize: 13.5, lineHeight: 1.6 }}>
                 All drivers register with validated driving licenses, vehicle registration plates, and KYC status approvals before going online.
@@ -629,7 +659,7 @@ export function Landing({
               onClick={onGetStarted}
               style={{ padding: "14px 32px", boxShadow: "var(--shadow-md)" }}
             >
-              🚀 Book Your First Ride Now
+              <Rocket size={16} /> Book Your First Ride Now
             </NeoButton>
             {onSwitchPortal && (
               <NeoButton
@@ -638,7 +668,7 @@ export function Landing({
                 onClick={onSwitchPortal}
                 style={{ padding: "14px 28px" }}
               >
-                Drive & Earn 100% →
+                Drive & Earn 100% <ArrowRight size={16} />
               </NeoButton>
             )}
           </div>

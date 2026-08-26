@@ -9,6 +9,7 @@ import History from "./screens/History";
 import { enablePushNotifications, pushSupported } from "./push";
 import { SafetyPanel } from "./components/SafetyPanel";
 import { SharePage } from "./components/SharePage";
+import { InstallBanner } from "./components/InstallBanner";
 
 function RiderConsole({
   logout,
@@ -55,6 +56,7 @@ function RiderConsole({
         )}
       </header>
       {safetyOpen && <SafetyPanel onClose={() => setSafetyOpen(false)} />}
+      <InstallBanner appName="Chalo-X Rider" />
       <main className="main-area" style={{ flex: 1, position: "relative", overflow: "hidden", height: "100%", width: "100%" }}>
         {activeTab === "history" ? <History /> : <Book />}
       </main>
@@ -159,7 +161,7 @@ export default function App(): React.ReactElement {
         }
       />
 
-      {/* Fallback */}
+            {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

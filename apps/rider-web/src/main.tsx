@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
 import App from "./App";
+import { registerPwa } from "./pwa";
 
 const container = document.getElementById("root");
 if (container) {
@@ -24,6 +25,4 @@ if (container) {
   }
 }
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"));
-}
+registerPwa("Chalo-X Rider");

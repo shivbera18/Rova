@@ -15,11 +15,45 @@ export interface Line {
   reason: LedgerReason;
 }
 
+/** Debit blocked unless `account` holds at least `minBalancePaise` when lines post. */
+export interface BalanceGuard {
+  account: string;
+  minBalancePaise: number;
+}
+
+export class InsufficientFundsError extends Error {
+  public statusCode = 402;
+  constructor(
+    public code: string,
+    public account: string,
+    public balancePaise: number,
+    public requiredPaise: number,
+  ) {
+    super(`account ${account} holds ₹${(balancePaise / 100).toFixed(2)}, needs ₹${(requiredPaise / 100).toFixed(2)}`);
+  }
+}
+
+async function lockedBalance(txSql: SqlRowClient, account: string): Promise<number> {
+  // Serialize per-account mutations so concurrent settlements/payouts cannot
+  // both pass a stale balance check (TOCTOU fix).
+  await txSql.query("SELECT pg_advisory_xact_lock(hashtext($1))", [account]);
+  const r = await txSql.query<{ net: string }>(
+    `SELECT
+       COALESCE(SUM(CASE WHEN credit_account = $1 THEN amount_paise ELSE 0 END),0)
+     - COALESCE(SUM(CASE WHEN debit_account = $1 THEN amount_paise ELSE 0 END),0)
+     AS net
+     FROM journal_entries`,
+    [account],
+  );
+  return Number(r.rows[0]?.net ?? 0);
+}
+
 export async function postTransaction(
   sql: SqlRowClient,
   lines: Line[],
   tripId: string | null,
   idempotencyKey: string | null = null,
+  balanceGuards: BalanceGuard[] = [],
 ): Promise<{ txnId: string; duplicate: boolean }> {
   const key = idempotencyKey ?? `auto:${randomUUID()}`;
 
@@ -37,6 +71,13 @@ export async function postTransaction(
       [key],
     );
     if (existing.rows.length > 0) return { txnId: existing.rows[0]!.txn_id, duplicate: true };
+
+    for (const g of balanceGuards) {
+      const bal = await lockedBalance(txSql, g.account);
+      if (bal < g.minBalancePaise) {
+        throw new InsufficientFundsError("INSUFFICIENT_FUNDS", g.account, bal, g.minBalancePaise);
+      }
+    }
 
     const txnId = randomUUID();
     for (const [i, l] of lines.entries()) {

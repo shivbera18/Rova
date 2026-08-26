@@ -53,7 +53,7 @@ import {
   TripError,
   verifyStartOtp,
 } from "./trips.ts";
-import { postTransaction, walletBalance } from "./ledger.ts";
+import { InsufficientFundsError, postTransaction, walletBalance } from "./ledger.ts";
 import type { LatLon } from "./types.ts";
 import type { TripRow } from "./db/rows.ts";
 import { enforceRateLimit, validateDriverGps, validateRideRequest } from "./security.ts";
@@ -805,16 +805,22 @@ export async function startServer(listenPort = PORT): Promise<{
     if (trip.payment_method === "WALLET" && (await walletBalance(sql, source)) < amountPaise!) {
       fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this tip");
     }
-    const txn = await postTransaction(
-      sql,
-      [{ debitAccount: source, creditAccount: `driver:${trip.driver_id}:WALLET`, amountPaise: amountPaise!, reason: "TIP" }],
-      id,
-      `tip:${id}`,
-    );
-    const fare = readFareJson(trip.fare_json);
-    fare.tipPaise = amountPaise!;
-    await sql.query("UPDATE trips SET fare_json=$2 WHERE id=$1", [id, JSON.stringify(fare)]);
-    return { ok: true, txnId: txn.txnId, duplicate: txn.duplicate };
+    try {
+      const txn = await postTransaction(
+        sql,
+        [{ debitAccount: source, creditAccount: `driver:${trip.driver_id}:WALLET`, amountPaise: amountPaise!, reason: "TIP" }],
+        id,
+        `tip:${id}`,
+        [{ account: source, minBalancePaise: amountPaise! }],
+      );
+      const fare = readFareJson(trip.fare_json);
+      fare.tipPaise = amountPaise!;
+      await sql.query("UPDATE trips SET fare_json=$2 WHERE id=$1", [id, JSON.stringify(fare)]);
+      return { ok: true, txnId: txn.txnId, duplicate: txn.duplicate };
+    } catch (err) {
+      if (err instanceof InsufficientFundsError) fail(402, "INSUFFICIENT_WALLET", "wallet balance is too low for this tip");
+      throw err;
+    }
   });
 
   app.post("/v1/trips/:id/cancel-rider", async (req) => {
@@ -1233,15 +1239,20 @@ export async function startServer(listenPort = PORT): Promise<{
     const { amountPaise } = req.body as { amountPaise?: number };
     if (!Number.isSafeInteger(amountPaise) || amountPaise! < 20_000) fail(400, "INVALID_PAYOUT", "minimum payout is ₹200");
     const account = `driver:${sess.userId}:WALLET`;
-    const balance = await walletBalance(sql, account);
-    if (balance < amountPaise!) fail(409, "INSUFFICIENT_BALANCE", "payout exceeds wallet balance");
-    const txn = await postTransaction(
-      sql,
-      [{ debitAccount: account, creditAccount: `external:BANK:${sess.userId}`, amountPaise: amountPaise!, reason: "PAYOUT" }],
-      null,
-      `payout:${sess.userId}:${randomUUID()}`,
-    );
-    return { ok: true, txnId: txn.txnId, balancePaise: await walletBalance(sql, account) };
+    try {
+      // Guard inside the posting tx: concurrent payouts cannot double-spend.
+      const txn = await postTransaction(
+        sql,
+        [{ debitAccount: account, creditAccount: `external:BANK:${sess.userId}`, amountPaise: amountPaise!, reason: "PAYOUT" }],
+        null,
+        `payout:${sess.userId}:${randomUUID()}`,
+        [{ account, minBalancePaise: amountPaise! }],
+      );
+      return { ok: true, txnId: txn.txnId, balancePaise: await walletBalance(sql, account) };
+    } catch (err) {
+      if (err instanceof InsufficientFundsError) fail(409, "INSUFFICIENT_BALANCE", "payout exceeds wallet balance");
+      throw err;
+    }
   });
 
   app.post("/v1/driver/onboarding", async (req) => {

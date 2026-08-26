@@ -59,11 +59,13 @@ function StartCodeBlock({
   otp,
   expiresInMs,
   attemptsLeft,
+  windowOpensOnArrival,
   onRegenerate,
 }: {
   otp: string;
   expiresInMs?: number;
   attemptsLeft?: number;
+  windowOpensOnArrival?: boolean;
   onRegenerate: () => void;
 }): React.ReactElement {
   const [remaining, setRemaining] = useState<number | null>(expiresInMs ?? null);
@@ -93,7 +95,7 @@ function StartCodeBlock({
   // people read the digits, not the caveat underneath them.
   if (expired || locked) {
     return (
-      <div className="otp-display" style={{ borderColor: "#b91c1c" }}>
+      <div className="otp-display" style={{ borderColor: "#b91c1c" }} role="status">
         <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "#b91c1c" }}>
           <KeyRound size={12} /> {locked ? "Code locked" : "Code expired"}
         </div>
@@ -122,12 +124,16 @@ function StartCodeBlock({
       <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
         {otp}
       </div>
-      {mmss && (
-        <div aria-hidden style={{ fontSize: 10.5, fontWeight: 800, color: "var(--ink-muted)" }}>
-          Valid for {mmss}
-          {attemptsLeft != null ? ` · ${attemptsLeft} tries left` : ""}
+      {mmss ? (
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--ink-muted)" }}>
+          <span aria-hidden>Valid for {mmss}</span>
+          {attemptsLeft != null ? <span> · {attemptsLeft} tries left</span> : null}
         </div>
-      )}
+      ) : windowOpensOnArrival ? (
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--ink-muted)" }}>
+          Your driver will ask for this at pickup
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -315,11 +321,26 @@ export default function Book(): React.ReactElement {
             ? { lat: full.driverLat, lng: full.driverLng }
             : null,
         );
-        // tripView omits the OTP by design — mint a fresh one for pre-start rides
-        const otp = PRE_START_STATES.includes(full.state)
-          ? await regenerateTripOtp(full.id).then((r) => r.otp).catch(() => undefined)
-          : undefined;
-        setPhase({ k: "trip", trip: otp ? { ...full, otp } : full });
+        // tripView omits the OTP by design. Re-issue one only while the driver is
+        // still en route — never at the pickup, where rotating the code would
+        // reset a window the driver is actively typing into.
+        const reissue =
+          PRE_START_STATES.includes(full.state) && full.state !== "ARRIVED"
+            ? await regenerateTripOtp(full.id).catch(() => undefined)
+            : undefined;
+        setPhase({
+          k: "trip",
+          trip: reissue
+            ? {
+                ...full,
+                otp: reissue.otp,
+                otpExpiresAt: reissue.otpExpiresAt,
+                otpExpiresInMs: reissue.otpExpiresInMs,
+                otpAttemptsLeft: reissue.otpAttemptsLeft,
+                otpAttemptsMax: reissue.otpAttemptsMax,
+              }
+            : full,
+        });
       } catch {
         // stay on the booking sheet; the user can book normally
       }
@@ -963,6 +984,7 @@ export default function Book(): React.ReactElement {
                 otp={phase.trip.otp}
                 expiresInMs={phase.trip.otpExpiresInMs}
                 attemptsLeft={phase.trip.otpAttemptsLeft}
+                windowOpensOnArrival={phase.trip.otpWindowOpensOnArrival}
                 onRegenerate={() => void handleRegenerateOtp()}
               />
             )}

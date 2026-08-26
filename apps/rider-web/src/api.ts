@@ -124,6 +124,7 @@ export interface TripView {
   otpExpiresInMs?: number;
   otpAttemptsLeft?: number;
   otpAttemptsMax?: number;
+  otpWindowOpensOnArrival?: boolean;
   paymentMethod?: "WALLET" | "UPI" | "CASH";
   startedAt?: string;
   endedAt?: string;

@@ -544,6 +544,19 @@ async function runVerification(): Promise<void> {
     const tripId = acceptRes.json.tripId;
 
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVING" }, driverToken);
+
+    // pre-arrival: the code exists but is not a timed challenge yet
+    const preArrival = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    assert(
+      preArrival.json.otpWindowOpensOnArrival === true && preArrival.json.otpExpiresInMs === undefined,
+      "Pre-arrival trips advertise no countdown",
+    );
+    const earlyStart = await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
+    assert(
+      earlyStart.status === 409 && earlyStart.json.code === "NOT_AT_PICKUP",
+      "Start code cannot be spent before the driver marks arrival",
+    );
+
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVED" }, driverToken);
 
     // arrival opens a fresh 5-minute window with a clean attempt budget

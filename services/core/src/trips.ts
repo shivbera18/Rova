@@ -116,8 +116,8 @@ export async function createTripFromAgreement(
   }
   await sql.query(
     `INSERT INTO otp_codes (trip_id, code_hash, expires_at)
-     VALUES ($1, $2, now() + ($3 || ' milliseconds')::interval)`,
-    [id, hashOtp(id, otp), String(OTP_TTL_MS)],
+     VALUES ($1, $2, now() + interval '12 hours')`,
+    [id, hashOtp(id, otp)],
   );
   releaseClaim(params.requestId);
 
@@ -129,7 +129,8 @@ export async function createTripFromAgreement(
 export async function getTrip(sql: SqlRowClient, tripId: string): Promise<TripRow | null> {
   const r = await sql.query<TripRow>(
     `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label, ru.full_name AS rider_name,
-            o.expires_at AS otp_expires_at, o.attempts AS otp_attempts
+            o.expires_at AS otp_expires_at, o.attempts AS otp_attempts,
+            (EXTRACT(EPOCH FROM (o.expires_at - now())) * 1000)::bigint AS otp_expires_in_ms
      FROM trips t
      JOIN ride_requests r ON r.id=t.request_id
      JOIN users ru ON ru.id = t.rider_id
@@ -181,8 +182,10 @@ export async function transitionTrip(
 
 /**
  * Start-code policy: the 5-minute window opens on ARRIVED (see transitionTrip)
- * and every regeneration; the mint at assignment is only a backstop so the row
- * always exists. Max 3 attempts per window.
+ * and on every regeneration. The row minted at assignment carries a far-future
+ * backstop expiry — it is never a countdown, because nobody is typing a code
+ * while the driver is still en route. Brute-force exposure is unchanged: the
+ * 3-attempt cap is independent of expiry.
  */
 export const OTP_TTL_MS = 5 * 60_000;
 export const OTP_MAX_ATTEMPTS = 3;

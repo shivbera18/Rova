@@ -1037,6 +1037,64 @@ export async function startServer(listenPort = PORT): Promise<{
     return { ok: true, contacts: parsed };
   });
 
+  app.get("/v1/rider/favorites", async (req) => {
+    const sess = requireRider(await session(req));
+    const rows = await sql.query<{
+      id: string;
+      name: string;
+      vehicleClass: string | null;
+      plate: string | null;
+      rating: number | null;
+    }>(
+      `SELECT f.driver_id AS id, u.full_name AS name,
+              d.vehicle_class AS "vehicleClass", d.plate, u.rating_rolling AS rating
+       FROM favorite_drivers f
+       JOIN users u ON u.id = f.driver_id
+       LEFT JOIN driver_profiles d ON d.user_id = f.driver_id
+       WHERE f.rider_id=$1
+       ORDER BY f.created_at DESC
+       LIMIT 10`,
+      [sess.userId],
+    );
+    return {
+      favorites: rows.rows.map((r) => ({ ...r, rating: Number(r.rating ?? 5) })),
+    };
+  });
+
+  app.put("/v1/drivers/:id/favorite", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      fail(400, "BAD_BODY", "driver id required");
+    }
+    if (id === sess.userId) fail(400, "BAD_BODY", "cannot favourite yourself");
+    const target = await sql.query<{ role: string }>("SELECT role FROM users WHERE id=$1", [id]);
+    if (target.rows[0]?.role !== "DRIVER") fail(404, "NOT_FOUND", "no such driver");
+    const existing = await sql.query(
+      "SELECT 1 FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2",
+      [sess.userId, id],
+    );
+    if (existing.rows.length === 0) {
+      const count = await sql.query<{ n: string }>(
+        "SELECT COUNT(*)::text AS n FROM favorite_drivers WHERE rider_id=$1",
+        [sess.userId],
+      );
+      if (Number(count.rows[0]?.n ?? 0) >= 10) fail(409, "FAVORITE_LIMIT", "up to 10 favourite drivers");
+      await sql.query(
+        "INSERT INTO favorite_drivers (rider_id, driver_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        [sess.userId, id],
+      );
+    }
+    return { ok: true };
+  });
+
+  app.delete("/v1/drivers/:id/favorite", async (req) => {
+    const sess = requireRider(await session(req));
+    const { id } = req.params as { id: string };
+    await sql.query("DELETE FROM favorite_drivers WHERE rider_id=$1 AND driver_id=$2", [sess.userId, id]);
+    return { ok: true };
+  });
+
   function tripView(trip: TripRow & { otpPlain?: string }): Record<string, unknown> {
     const fare = readFareJson(trip.fare_json);
     const driver = getLiveDriver(trip.driver_id);

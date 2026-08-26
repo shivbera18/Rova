@@ -11,6 +11,7 @@ import { TripPanel } from "./TripPanel";
 import { EarningsDrawer, type DriverMe } from "./EarningsDrawer";
 import { OnboardingCard } from "./OnboardingCard";
 import { enablePushNotifications, pushSupported } from "./push";
+import { InstallBanner } from "./InstallBanner";
 
 const TRIP_KEY = "cx.driver.trip";
 
@@ -218,6 +219,7 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
           <TriangleAlert size={14} color="#dc2626" /> {gpsError}
         </div>
       )}
+      <InstallBanner appName="Chalo-X Driver" />
       <header className="topbar">
         <Link to="/" className="brand-badge">
           CHALO<span className="brand-accent">-X</span> DRIVER

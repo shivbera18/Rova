@@ -413,8 +413,8 @@ export async function startServer(listenPort = PORT): Promise<{
       `INSERT INTO ride_requests
          (id, rider_id, city_id, vehicle_class, mode, state, payment_method,
           pickup_lat, pickup_lng, drop_lat, drop_lng, list_price, platform_fee,
-          pickup_label, drop_label)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          pickup_label, drop_label, requested_driver_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
         requestId,
         sess.userId,
@@ -431,6 +431,7 @@ export async function startServer(listenPort = PORT): Promise<{
         platformContribution,
         clean(body.pickupLabel),
         clean(body.dropLabel),
+        requestedDriverId,
       ],
     );
 

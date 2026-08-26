@@ -970,9 +970,11 @@ export async function startServer(listenPort = PORT): Promise<{
   /** Relay a validated driver position to the rider of their active trip (protocol `trip.location`). */
   async function relayPositionToRider(driverId: string, lat: number, lng: number): Promise<void> {
     const active = await sql.query<{ rider_id: string }>(
+      // trips has no created_at; ended_at DESC NULLS FIRST rides idx_trips_driver
+      // and prefers never-ended (active) rows when a driver holds several.
       `SELECT rider_id FROM trips
        WHERE driver_id=$1 AND state IN ('DRIVER_ASSIGNED','ARRIVING','ARRIVED','ONGOING')
-       ORDER BY created_at DESC
+       ORDER BY ended_at DESC NULLS FIRST
        LIMIT 1`,
       [driverId],
     );

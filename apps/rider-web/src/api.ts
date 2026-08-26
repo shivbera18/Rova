@@ -107,9 +107,9 @@ export interface TripView {
   drop: LatLon;
   otp?: string;
   fareBreakdown: FareBreakdownView;
-  driverName: string;
-  driverPlate: string;
-  driverRating: number;
+  driverName?: string;
+  driverPlate?: string;
+  driverRating?: number;
   driverLat?: number;
   driverLng?: number;
   paymentMethod?: "WALLET" | "UPI" | "CASH";

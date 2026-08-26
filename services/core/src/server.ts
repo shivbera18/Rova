@@ -885,17 +885,26 @@ export async function startServer(listenPort = PORT): Promise<{
     });
     pushDriver(driverId, { t: "trip.state", state: "DRIVER_ASSIGNED", tripId: trip.id });
 
-    // register live presence for tracking
+    // Re-register presence for tracking without fabricating identity:
+    // prefer the connected socket entry, fall back to the DB profile.
+    const existingLive = getLiveDriver(driverId);
+    const profileRow = (
+      await sql.query<{ plate: string; full_name: string; rating_rolling: string | null }>(
+        `SELECT d.plate, u.full_name, u.rating_rolling
+         FROM driver_profiles d JOIN users u ON u.id=d.user_id WHERE d.user_id=$1`,
+        [driverId],
+      )
+    ).rows[0];
     registerDriver({
       driverId,
       vehicleClass: rr.vehicle_class,
-      pos: { lat: rr.pickup_lat, lng: rr.pickup_lng },
+      pos: existingLive?.pos ?? { lat: rr.pickup_lat, lng: rr.pickup_lng },
       online: true,
       onTrip: true,
-      name: "Driver",
-      plate: "KA01AB1234",
-      rating: 4.8,
-      push: (msg) => pushDriver(driverId, msg),
+      name: existingLive?.name ?? profileRow?.full_name ?? "Driver",
+      plate: existingLive?.plate ?? profileRow?.plate ?? "",
+      rating: existingLive?.rating ?? Number(profileRow?.rating_rolling ?? 4.8),
+      push: existingLive?.push ?? ((msg) => pushDriver(driverId, msg)),
     });
 
     return { tripId: trip.id, otp };

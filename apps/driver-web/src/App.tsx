@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { formatINR, paisa, type LatLon } from "@chalo/protocol";
+import { Bell, LogOut, Play, Square } from "lucide-react";
 import { clearToken, connectDriverSocket, getToken, api, type DriverSocket } from "./api";
 import { Login } from "./Login";
 import { DriverLanding } from "./Landing";
@@ -14,11 +15,11 @@ import { enablePushNotifications, pushSupported } from "./push";
 const TRIP_KEY = "cx.driver.trip";
 
 const HOTSPOTS: Array<{ name: string; pos: LatLon }> = [
-  { name: "📍 Koramangala", pos: { lat: 12.9352, lng: 77.6245 } },
-  { name: "📍 Indiranagar", pos: { lat: 12.9784, lng: 77.6408 } },
-  { name: "📍 MG Road", pos: { lat: 12.9757, lng: 77.6068 } },
-  { name: "📍 HSR Layout", pos: { lat: 12.9116, lng: 77.6474 } },
-  { name: "📍 Airport", pos: { lat: 13.1986, lng: 77.7066 } },
+  { name: "Koramangala", pos: { lat: 12.9352, lng: 77.6245 } },
+  { name: "Indiranagar", pos: { lat: 12.9784, lng: 77.6408 } },
+  { name: "MG Road", pos: { lat: 12.9757, lng: 77.6068 } },
+  { name: "HSR Layout", pos: { lat: 12.9116, lng: 77.6474 } },
+  { name: "Airport", pos: { lat: 13.1986, lng: 77.7066 } },
 ];
 
 function DriverConsole({ onLogout }: { onLogout: () => void }) {
@@ -177,20 +178,21 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
             className={`brut-btn brut-btn-sm ${online ? "brut-btn-red" : "brut-btn-green"}`}
             onClick={() => setOnline((prev) => !prev)}
           >
-            {online ? "⏹ Go Offline" : "▶ Go Online"}
+            {online ? <Square size={13} /> : <Play size={13} />}
+            {online ? "Go Offline" : "Go Online"}
           </button>
           <button className="brut-btn brut-btn-white brut-btn-sm" onClick={() => setDrawerOpen(true)}>
             {me ? `${formatINR(paisa(me.walletBalancePaise))} · ${me.completedTrips} rides` : "Earnings"}
           </button>
           <button className="brut-btn brut-btn-white brut-btn-sm" onClick={onLogout}>
-            🚪 Logout
+            <LogOut size={14} /> Logout
           </button>
           {pushSupported() && pushState !== "granted" && (
             <button
               className="brut-btn brut-btn-white brut-btn-sm"
               onClick={() => void enablePushNotifications().then(setPushState).catch(() => setPushState("denied"))}
             >
-              🔔 Alerts
+              <Bell size={14} /> Alerts
             </button>
           )}
         </div>

@@ -1,27 +1,30 @@
 import { useState } from "react";
 import type { LatLon } from "@chalo/protocol";
 import { formatINR, paisa } from "@chalo/protocol";
+import { Banknote, Bike, Bus, Car, CarFront, CarTaxiFront, Sparkles, TriangleAlert, X, Zap } from "lucide-react";
 import type { RequestSessionView, Quote } from "../api";
 import { createRequest } from "../api";
 
 export const EXPLAINER_COPY =
   "This contribution funds Chalo-X servers, dispatch, support and safety. You may change it — even to ₹0 — before sending your offer.";
 
-const VEHICLE_META: Record<string, { label: string; icon: string; seats: string }> = {
-  BIKE_LITE: { label: "Bike Lite", icon: "🛵", seats: "1 seat" },
-  BIKE: { label: "Bike", icon: "🏍️", seats: "1 seat" },
-  AUTO: { label: "Auto", icon: "🛺", seats: "3 seats" },
-  CAB_MINI: { label: "Cab Mini", icon: "🚗", seats: "4 seats" },
-  CAB_PRIME: { label: "Cab Prime", icon: "🚘", seats: "4 seats · Sedan" },
-  CAB_XL: { label: "Cab XL", icon: "🚙", seats: "6 seats · SUV" },
+type IconCmp = React.ComponentType<{ size?: number | string; strokeWidth?: number | string }>;
+
+const VEHICLE_META: Record<string, { label: string; icon: IconCmp; seats: string }> = {
+  BIKE_LITE: { label: "Bike Lite", icon: Bike, seats: "1 seat" },
+  BIKE: { label: "Bike", icon: Bike, seats: "1 seat" },
+  AUTO: { label: "Auto", icon: CarTaxiFront, seats: "3 seats" },
+  CAB_MINI: { label: "Cab Mini", icon: Car, seats: "4 seats" },
+  CAB_PRIME: { label: "Cab Prime", icon: CarFront, seats: "4 seats · Sedan" },
+  CAB_XL: { label: "Cab XL", icon: Bus, seats: "6 seats · SUV" },
 };
 
 export function vehicleLabel(vc: string): string {
   return VEHICLE_META[vc]?.label ?? vc;
 }
 
-export function vehicleIcon(vc: string): string {
-  return VEHICLE_META[vc]?.icon ?? "🚗";
+export function vehicleIcon(vc: string): IconCmp {
+  return VEHICLE_META[vc]?.icon ?? Car;
 }
 
 function paiseFromInput(value: string): number {
@@ -54,7 +57,8 @@ export default function OfferSheet({
   const amountsValid = driverPaise >= 0 && platformPaise >= 0;
   const totalPaise = Math.max(0, driverPaise) + Math.max(0, platformPaise);
   const savingsVsList = quote.listPrice - totalPaise;
-  const meta = VEHICLE_META[quote.vehicleClass] ?? { label: quote.vehicleClass, icon: "🚗", seats: "4 seats" };
+  const meta = VEHICLE_META[quote.vehicleClass] ?? { label: quote.vehicleClass, icon: Car, seats: "4 seats" };
+  const Icon = meta.icon;
 
   async function submit(negotiate: boolean): Promise<void> {
     setBusy(true);
@@ -85,8 +89,8 @@ export default function OfferSheet({
       {/* Header */}
       <div className="spread" style={{ marginBottom: 16 }}>
         <div className="row" style={{ gap: 12 }}>
-          <span style={{ fontSize: 32, padding: "4px 8px", background: "var(--paper-subtle)", borderRadius: "var(--radius-sm)", border: "var(--brut-border-thin)" }}>
-            {meta.icon}
+          <span style={{ padding: "8px", background: "var(--paper-subtle)", borderRadius: "var(--radius-sm)", border: "var(--brut-border-thin)", display: "grid", placeItems: "center" }}>
+            <Icon size={26} strokeWidth={2.2} />
           </span>
           <div>
             <h3 style={{ fontSize: 18, textTransform: "none" }}>{meta.label}</h3>
@@ -99,9 +103,9 @@ export default function OfferSheet({
           className="brut-btn brut-btn-white brut-btn-sm"
           onClick={onClose}
           aria-label="Close"
-          style={{ width: 32, height: 32, padding: 0, fontSize: 16 }}
+          style={{ width: 32, height: 32, padding: 0 }}
         >
-          ✕
+          <X size={16} />
         </button>
       </div>
 
@@ -136,7 +140,7 @@ export default function OfferSheet({
       >
         <div className="spread" style={{ marginBottom: 8 }}>
           <div className="row" style={{ gap: 6 }}>
-            <span style={{ fontSize: 16 }}>🛵</span>
+            <Banknote size={16} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 13 }}>Driver Take-Home</div>
               <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>100% goes directly to driver</div>
@@ -187,7 +191,7 @@ export default function OfferSheet({
       >
         <div className="spread" style={{ marginBottom: 8 }}>
           <div className="row" style={{ gap: 6 }}>
-            <span style={{ fontSize: 16 }}>⚡</span>
+            <Zap size={16} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 13 }}>Platform Fee</div>
               <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>Servers, safety & dispatch</div>
@@ -251,8 +255,9 @@ export default function OfferSheet({
         </div>
 
         {savingsVsList > 0 && (
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--green)", marginTop: 6 }}>
-            ✨ You save {formatINR(paisa(savingsVsList))} compared to standard estimate
+          <div className="row" style={{ fontSize: 12, fontWeight: 700, color: "var(--green)", marginTop: 6, gap: 4 }}>
+            <Sparkles size={13} />
+            <span>You save {formatINR(paisa(savingsVsList))} compared to standard estimate</span>
           </div>
         )}
       </div>
@@ -261,8 +266,9 @@ export default function OfferSheet({
         <div
           className="brut-badge brut-badge-red"
           style={{ width: "100%", padding: "8px 12px", marginBottom: 12, textTransform: "none", fontSize: 13 }}
+          role="alert"
         >
-          ⚠️ {error}
+          <TriangleAlert size={14} /> {error}
         </div>
       )}
 

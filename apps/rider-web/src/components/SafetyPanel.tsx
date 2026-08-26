@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { PhoneCall, Share2, ShieldCheck, UserRoundCheck, X } from "lucide-react";
+import { CircleCheck, PhoneCall, Share2, ShieldCheck, UserRoundCheck, X } from "lucide-react";
 import { NeoCard, NeoButton, NeoInput } from "./NeoComponents";
 
 export function SafetyPanel({ onClose }: { onClose: () => void }): React.ReactElement {
@@ -101,7 +101,7 @@ export function SafetyPanel({ onClose }: { onClose: () => void }): React.ReactEl
 
             {saved && (
               <div className="ok-text" style={{ marginTop: 12 }}>
-                ✓ Trusted contact saved successfully
+                <CircleCheck size={14} /> Trusted contact saved successfully
               </div>
             )}
 

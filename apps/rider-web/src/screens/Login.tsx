@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { AuthSession } from "@chalo/protocol";
+import { ArrowLeft, ArrowRight, Rocket, TriangleAlert, CarFront } from "lucide-react";
 import { setToken } from "../api";
 import { useNavigate } from "react-router-dom";
 import { NeoButton, NeoCard, NeoBadge, NeoInput } from "../components/NeoComponents";
@@ -65,7 +66,9 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
     <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "var(--paper)" }}>
       <NeoCard elevation="lg" style={{ width: "100%", maxWidth: 420, padding: 32, background: "#ffffff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <span style={{ fontSize: 28 }}>🚗</span>
+          <span style={{ color: "var(--primary)", display: "grid", placeItems: "center", width: 40, height: 40, border: "var(--brut-border-thin)", borderRadius: "var(--radius-sm)", background: "var(--primary-soft)" }}>
+            <CarFront size={22} />
+          </span>
           <div>
             <h1 style={{ fontSize: 24, textTransform: "uppercase" }}>Rider Sign-In</h1>
             <NeoBadge variant="primary">NAME YOUR FARE</NeoBadge>
@@ -79,8 +82,8 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
         </p>
 
         {error && (
-          <div className="error-text" style={{ marginBottom: 16 }}>
-            ⚠️ {error}
+          <div className="error-text" style={{ marginBottom: 16 }} role="alert">
+            <TriangleAlert size={14} /> {error}
           </div>
         )}
 
@@ -118,7 +121,11 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
           )}
 
           <NeoButton variant="primary" fullWidth type="submit" disabled={busy}>
-            {busy ? "Authenticating..." : step === "PHONE" ? "Get Login Code →" : "Verify & Book Rides 🚀"}
+            {busy
+              ? "Authenticating..."
+              : step === "PHONE"
+                ? <>Get Login Code <ArrowRight size={15} /></>
+                : <>Verify & Book Rides <Rocket size={15} /></>}
           </NeoButton>
 
           {step === "OTP" && (
@@ -130,7 +137,7 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
               disabled={busy}
               onClick={() => setStep("PHONE")}
             >
-              ← Use a different number
+              <ArrowLeft size={14} /> Use a different number
             </NeoButton>
           )}
         </form>
@@ -142,7 +149,7 @@ export default function Login({ onAuth }: { onAuth: () => void }): React.ReactEl
           style={{ marginTop: 14, fontSize: 12.5 }}
           onClick={() => navigate("/")}
         >
-          ← Back to Home
+          <ArrowLeft size={14} /> Back to Home
         </NeoButton>
       </NeoCard>
     </div>

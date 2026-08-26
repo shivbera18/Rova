@@ -1,14 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LatLon, RiderWsMessage } from "@chalo/protocol";
+import { distanceKm } from "@chalo/protocol";
 import { formatINR, paisa } from "@chalo/protocol";
+import {
+  ArrowUpRight,
+  Banknote,
+  CircleCheck,
+  Clock,
+  KeyRound,
+  LocateFixed,
+  Radar,
+  RefreshCw,
+  Rocket,
+  Star,
+  Timer,
+  TriangleAlert,
+  Wallet as WalletIcon,
+  Zap,
+} from "lucide-react";
 import MapView from "../components/MapView";
 import OfferSheet, { vehicleLabel, vehicleIcon } from "../components/OfferSheet";
 import { LocationSearch, type SelectedPlace } from "../components/LocationSearch";
 import CounterModal, { type DriverCounter } from "../components/CounterModal";
 import { useCountdown, useRiderSocket } from "../ws";
-import { NeoCard, NeoButton, NeoBadge } from "../components/NeoComponents";
+import { NeoCard, NeoButton, NeoBadge, NeoInput } from "../components/NeoComponents";
 import {
   addTripTip,
+  ApiError,
   cancelMatchedTrip,
   cancelRequest,
   getTrip,
@@ -45,25 +63,28 @@ function readRoutes(key: string): StoredRoute[] {
 }
 
 const PAY_METHODS = ["UPI", "WALLET", "CASH"] as const;
-const MATCH_TOTAL_S = 45;
-const POPULAR_ROUTES: Array<{ label: string; pickup: LatLon; drop: LatLon }> = [
+const POPULAR_ROUTES: Array<{ from: string; to: string; pickup: LatLon; drop: LatLon }> = [
   {
-    label: "⚡ Koramangala ➔ Jayanagar",
+    from: "Koramangala",
+    to: "Jayanagar",
     pickup: { lat: 12.9352, lng: 77.6245 },
     drop: { lat: 12.9308, lng: 77.5838 },
   },
   {
-    label: "⚡ Koramangala ➔ Indiranagar",
+    from: "Koramangala",
+    to: "Indiranagar",
     pickup: { lat: 12.9352, lng: 77.6245 },
     drop: { lat: 12.9784, lng: 77.6408 },
   },
   {
-    label: "⚡ MG Road ➔ HSR Layout",
+    from: "MG Road",
+    to: "HSR Layout",
     pickup: { lat: 12.9757, lng: 77.6068 },
     drop: { lat: 12.9116, lng: 77.6474 },
   },
   {
-    label: "⚡ Indiranagar ➔ Airport",
+    from: "Indiranagar",
+    to: "Airport",
     pickup: { lat: 12.9784, lng: 77.6408 },
     drop: { lat: 13.1986, lng: 77.7066 },
   },
@@ -96,6 +117,18 @@ function stateLabel(s: string): string {
   }
 }
 
+const PRE_START_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"];
+
+/** Honest straight-line estimate at a typical city speed; null when unknowable. */
+function pickupEtaMin(trip: TripView, livePos: LatLon | null): number | null {
+  if (!PRE_START_STATES.includes(trip.state)) return null;
+  const pos = livePos ?? (trip.driverLat != null && trip.driverLng != null ? { lat: trip.driverLat, lng: trip.driverLng } : null);
+  if (!pos) return null;
+  const km = distanceKm(pos, trip.pickup);
+  if (!Number.isFinite(km) || km > 40) return null;
+  return Math.max(1, Math.round((km / 22) * 60));
+}
+
 export default function Book(): React.ReactElement {
   const [phase, setPhase] = useState<Phase>({ k: "pick" });
   const [pickup, setPickup] = useState<LatLon | null>(null);
@@ -106,7 +139,6 @@ export default function Book(): React.ReactElement {
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveDriverPos, setLiveDriverPos] = useState<LatLon | null>(null);
-  const [savedRoutes, setSavedRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.savedRoutes"));
   const [recentRoutes, setRecentRoutes] = useState<StoredRoute[]>(() => readRoutes("chalox.recentRoutes"));
   const [showCounterModal, setShowCounterModal] = useState(false);
   const [activeDriverCounter, setActiveDriverCounter] = useState<DriverCounter | null>(null);
@@ -114,8 +146,15 @@ export default function Book(): React.ReactElement {
   const [ratingVal, setRatingVal] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
   const [tipPaise, setTipPaise] = useState(0);
+  const [tipDone, setTipDone] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [sheetCollapsed, setSheetCollapsed] = useState(false);
+
+  // New booking stage always deserves the rider's attention: raise the sheet.
+  useEffect(() => {
+    setSheetCollapsed(false);
+  }, [phase.k]);
 
   useEffect(() => {
     void getWallet()
@@ -123,10 +162,14 @@ export default function Book(): React.ReactElement {
       .catch(() => undefined);
   }, []);
 
-  const [counterCount, setCounterCount] = useState(0);
-  const [counterRound, setCounterRound] = useState(1);
-  const [counterExpiresAt, setCounterExpiresAt] = useState<string | null>(null);
-  const countdownSeconds = useCountdown(counterExpiresAt);
+  async function handleTopUp(): Promise<void> {
+    try {
+      const w = await topUpWallet(50_000);
+      setWalletBalance(w.balancePaise);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Top-up failed");
+    }
+  }
 
   const handleWsMessage = useCallback((msg: RiderWsMessage) => {
     if (msg.t === "request.updated") {
@@ -135,9 +178,6 @@ export default function Book(): React.ReactElement {
         return { ...prev, session: msg.session as unknown as RequestSessionView };
       });
     } else if (msg.t === "negotiation.counter") {
-      setCounterCount((c) => c + 1);
-      setCounterRound(msg.round);
-      setCounterExpiresAt(msg.expiresAt);
       setActiveDriverCounter({
         negotiationId: msg.negotiationId,
         counterPaise: msg.paise,
@@ -149,6 +189,7 @@ export default function Book(): React.ReactElement {
       setShowCounterModal(false);
       setActiveDriverCounter(null);
       setTipPaise(0);
+      setTipDone(false);
       setRated(false);
       setPhase({ k: "trip", trip: msg.trip });
     } else if (msg.t === "trip.location") {
@@ -163,6 +204,25 @@ export default function Book(): React.ReactElement {
   }, []);
 
   const { connected: wsConnected } = useRiderSocket(handleWsMessage);
+
+  // Real class/fee for the counter dialog; never fall back to fabricated values.
+  const liveNegotiation = phase.k === "matching" ? phase : null;
+  const liveVehicleClass = liveNegotiation?.quote?.vehicleClass;
+  const livePlatformPaise =
+    liveNegotiation?.session.platformFeePaise ?? liveNegotiation?.quote?.platformFeePaise;
+
+  // Matching lifecycle: countdown + expiry detection drive the radar card.
+  const matchSession = phase.k === "matching" ? phase.session : null;
+  const matchSecs = useCountdown(matchSession?.expiresAt);
+  const matchExpired =
+    !!matchSession && (matchSession.state === "EXPIRED" || (matchSecs ?? 1) <= 0);
+
+  const etaMin = phase.k === "trip" ? pickupEtaMin(phase.trip, liveDriverPos) : null;
+
+  async function searchAgain(): Promise<void> {
+    if (!pickup || !drop || loadingQuotes) return;
+    await loadQuotesForRoute(pickup, drop);
+  }
 
   const pollRef = useRef<number | null>(null);
   const stopPoll = useCallback(() => {
@@ -274,14 +334,62 @@ export default function Book(): React.ReactElement {
   }
 
   async function selectPopularRoute(route: typeof POPULAR_ROUTES[0]): Promise<void> {
-    const from = route.label.split("➔")[0]?.replace("⚡", "").trim() ?? "Pickup";
-    const to = route.label.split("➔")[1]?.trim() ?? "Drop-off";
     setPickup(route.pickup);
-    setPickupLabel(from);
+    setPickupLabel(route.from);
     setDrop(route.drop);
-    setDropLabel(to);
-    rememberRecent(route.pickup, route.drop, from, to);
+    setDropLabel(route.to);
+    rememberRecent(route.pickup, route.drop, route.from, route.to);
     await loadQuotesForRoute(route.pickup, route.drop);
+  }
+
+  async function confirmCancelTrip(): Promise<void> {
+    if (phase.k !== "trip") return;
+    try {
+      await cancelMatchedTrip(phase.trip.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not cancel the trip");
+    } finally {
+      setShowCancelConfirm(false);
+    }
+    reset();
+  }
+
+  async function handleRegenerateOtp(): Promise<void> {
+    if (phase.k !== "trip") return;
+    try {
+      const { otp } = await regenerateTripOtp(phase.trip.id);
+      setPhase((p) => (p.k === "trip" ? { ...p, trip: { ...p.trip, otp } } : p));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate a new code");
+    }
+  }
+
+  async function submitRating(): Promise<void> {
+    if (phase.k !== "done") return;
+    try {
+      await rateTrip(phase.trip.id, { stars: ratingVal, comment: ratingComment.trim() || undefined });
+      setRated(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "ALREADY_RATED") {
+        setRated(true);
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Could not submit your rating");
+    }
+  }
+
+  async function submitTip(): Promise<void> {
+    if (phase.k !== "done" || tipPaise <= 0) return;
+    try {
+      await addTripTip(phase.trip.id, tipPaise);
+      setTipDone(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "TIP_ALREADY_SET") {
+        setTipDone(true);
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Could not add your tip");
+    }
   }
 
   function reset(): void {
@@ -298,7 +406,8 @@ export default function Book(): React.ReactElement {
     <div className="book-wrap">
       {!wsConnected && (
         <div className="connection-banner">
-          <span>⚡ Live updates reconnecting...</span>
+          <TriangleAlert size={14} />
+          <span>Live updates reconnecting — fares may be stale</span>
         </div>
       )}
 
@@ -311,10 +420,33 @@ export default function Book(): React.ReactElement {
         />
       </div>
 
-      <div className="side-panel">
+      <div className={`side-panel${sheetCollapsed ? " collapsed" : ""}`}>
+        <button
+          type="button"
+          className="sheet-handle"
+          aria-label={sheetCollapsed ? "Expand trip panel" : "Collapse trip panel"}
+          aria-expanded={!sheetCollapsed}
+          onClick={() => setSheetCollapsed((v) => !v)}
+          onPointerDown={(e) => {
+            const startY = e.clientY;
+            let moved = 0;
+            const onMove = (ev: PointerEvent): void => { moved = ev.clientY - startY; };
+            const onUp = (): void => {
+              window.removeEventListener("pointermove", onMove);
+              window.removeEventListener("pointerup", onUp);
+              if (Math.abs(moved) > 32) setSheetCollapsed(moved > 0);
+            };
+            window.addEventListener("pointermove", onMove);
+            window.addEventListener("pointerup", onUp);
+          }}
+        >
+          <span className="sheet-grip" />
+        </button>
+
+        <div className="sheet-body">
         {error && (
-          <div className="error-text" style={{ marginBottom: 12 }}>
-            ⚠️ {error}
+          <div className="error-text" style={{ marginBottom: 12 }} role="alert">
+            <TriangleAlert size={14} /> {error}
           </div>
         )}
 
@@ -373,15 +505,15 @@ export default function Book(): React.ReactElement {
                 );
               }}
             >
-              ◎ Use my current location
+              <LocateFixed size={15} /> Use my current location
             </button>
 
             <div className="booking-divider"><span>POPULAR ROUTES</span></div>
             <div className="quick-places-row">
               {POPULAR_ROUTES.map((r) => (
-                <button key={r.label} type="button" className="saved-route" onClick={() => void selectPopularRoute(r)}>
-                  <span>↗</span>
-                  <small>{r.label.replace("⚡ ", "")}</small>
+                <button key={`${r.from}-${r.to}`} type="button" className="saved-route" onClick={() => void selectPopularRoute(r)}>
+                  <ArrowUpRight size={14} />
+                  <small>{`${r.from} → ${r.to}`}</small>
                 </button>
               ))}
             </div>
@@ -392,7 +524,7 @@ export default function Book(): React.ReactElement {
                 <div className="quick-places-row">
                   {recentRoutes.slice(0, 3).map((route) => (
                     <button key={route.id} type="button" className="saved-route" onClick={() => void selectStoredRoute(route)}>
-                      <span>↻</span>
+                      <Clock size={14} />
                       <small>{route.label}</small>
                     </button>
                   ))}
@@ -401,19 +533,37 @@ export default function Book(): React.ReactElement {
             )}
 
             <div className="booking-options">
-              <div>
+              <div style={{ width: "100%" }}>
                 <span className="option-label">PAYMENT METHOD</span>
                 <div className="payment-group">
-                  {PAY_METHODS.map((pm) => (
-                    <button
-                      key={pm}
-                      className={`payment-pill ${payMethod === pm ? "selected" : ""}`}
-                      onClick={() => setPayMethod(pm)}
-                    >
-                      {pm === "UPI" ? "⚡ UPI" : pm === "WALLET" ? "▣ Wallet" : "₹ Cash"}
-                    </button>
-                  ))}
+                  {PAY_METHODS.map((pm) => {
+                    const Icon = pm === "UPI" ? Zap : pm === "WALLET" ? WalletIcon : Banknote;
+                    return (
+                      <button
+                        key={pm}
+                        className={`payment-pill ${payMethod === pm ? "selected" : ""}`}
+                        onClick={() => setPayMethod(pm)}
+                      >
+                        <Icon size={13} /> {pm === "WALLET" ? "Wallet" : pm}
+                      </button>
+                    );
+                  })}
                 </div>
+                {payMethod === "WALLET" && (
+                  <div className="row" style={{ justifyContent: "space-between", marginTop: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-muted)" }}>
+                      Balance: {walletBalance !== null ? formatINR(paisa(walletBalance)) : "…"}
+                    </span>
+                    <button
+                      type="button"
+                      className="use-location-btn"
+                      style={{ padding: "4px 12px", width: "auto" }}
+                      onClick={() => void handleTopUp()}
+                    >
+                      + Add ₹500 (dev)
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -436,27 +586,32 @@ export default function Book(): React.ReactElement {
             </div>
 
             <div className="col" style={{ gap: 8 }}>
-              {phase.quotes.map((q) => (
-                <div
-                  key={q.vehicleClass}
-                  className="quote-row"
-                  onClick={() => setPhase({ k: "offer", quote: q })}
-                >
-                  <div className="quote-class">
-                    <span style={{ fontSize: 24 }}>{vehicleIcon(q.vehicleClass)}</span>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: 14.5 }}>{vehicleLabel(q.vehicleClass)}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--ink-muted)", fontWeight: 600 }}>
-                        {q.distanceKm} km · ~{q.etaMin} min ETA
+              {phase.quotes.map((q) => {
+                const QIcon = vehicleIcon(q.vehicleClass);
+                return (
+                  <div
+                    key={q.vehicleClass}
+                    className="quote-row"
+                    onClick={() => setPhase({ k: "offer", quote: q })}
+                  >
+                    <div className="quote-class">
+                      <span style={{ display: "grid", placeItems: "center", width: 34, height: 34, border: "var(--brut-border-thin)", borderRadius: "var(--radius-sm)", background: "var(--paper-subtle)" }}>
+                        <QIcon size={20} strokeWidth={2.2} />
+                      </span>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 14.5 }}>{vehicleLabel(q.vehicleClass)}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--ink-muted)", fontWeight: 600 }}>
+                          {q.distanceKm} km · ~{q.etaMin} min ETA
+                        </div>
                       </div>
                     </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div className="quote-price">{formatINR(paisa(q.listPrice))}</div>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--primary)" }}>Name your offer →</div>
+                    </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div className="quote-price">{formatINR(paisa(q.listPrice))}</div>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--primary)" }}>Name your offer →</div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </NeoCard>
         )}
@@ -476,15 +631,23 @@ export default function Book(): React.ReactElement {
         )}
 
         {/* Phase 4: Matching Status Card */}
-        {phase.k === "matching" && (
+        {phase.k === "matching" && !matchExpired && (
           <NeoCard elevation="md" style={{ padding: 22 }}>
             <div className="spread" style={{ marginBottom: 12 }}>
-              <span className="eyebrow">RADAR ACTIVE</span>
-              <NeoBadge variant="green">SEARCHING DRIVERS</NeoBadge>
+              <span className="eyebrow"><Radar size={13} style={{ verticalAlign: -2 }} /> RADAR ACTIVE</span>
+              <NeoBadge variant={matchSecs !== null && matchSecs <= 10 ? "red" : "green"}>
+                {matchSecs !== null ? (
+                  <span className="row" style={{ gap: 4, alignItems: "center" }}>
+                    <Timer size={12} /> {matchSecs}s
+                  </span>
+                ) : "SEARCHING"}
+              </NeoBadge>
             </div>
             <h3 style={{ fontSize: 20, marginBottom: 6 }}>Connecting With Drivers...</h3>
             <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
               Broadcasting your offer to nearby verified drivers.
+              {phase.session.mode === "NEGOTIATED" &&
+                ` Round ${phase.session.round} of ${phase.session.maxRounds}.`}
             </p>
 
             <div className="progress-track" style={{ marginBottom: 16 }}>
@@ -506,24 +669,82 @@ export default function Book(): React.ReactElement {
           </NeoCard>
         )}
 
+        {/* Phase 4b: Matching Expired — offer recovery instead of a dead end */}
+        {phase.k === "matching" && matchExpired && (
+          <NeoCard elevation="md" style={{ padding: 22 }}>
+            <div className="spread" style={{ marginBottom: 12 }}>
+              <span className="eyebrow">NO TAKERS YET</span>
+              <NeoBadge variant="red">EXPIRED</NeoBadge>
+            </div>
+            <h3 style={{ fontSize: 20, marginBottom: 6 }}>No driver accepted your offer</h3>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
+              Try a higher driver amount or check nearby fares again — prices shift with demand.
+            </p>
+
+            <div className="col" style={{ gap: 10 }}>
+              <NeoButton variant="primary" fullWidth disabled={loadingQuotes} onClick={() => void searchAgain()}>
+                {loadingQuotes ? "Checking fares..." : "Search Again"}
+              </NeoButton>
+              <NeoButton variant="white" fullWidth onClick={reset}>
+                Change Route
+              </NeoButton>
+            </div>
+          </NeoCard>
+        )}
+
         {/* Phase 5: Ongoing Trip Card */}
         {phase.k === "trip" && (
           <NeoCard elevation="md" style={{ padding: 22 }}>
             <div className="spread" style={{ marginBottom: 12 }}>
               <NeoBadge variant="primary">{phase.trip.state}</NeoBadge>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)" }}>{phase.trip.vehicleClass}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-muted)" }}>{vehicleLabel(phase.trip.vehicleClass)}</span>
             </div>
-            <h3 style={{ fontSize: 20, marginBottom: 8 }}>{stateLabel(phase.trip.state)}</h3>
+
+            <div className="driver-card">
+              <div className="driver-avatar" aria-hidden>
+                {(phase.trip.driverName || "D").slice(0, 1).toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14.5 }}>
+                  {phase.trip.driverName || "Driver details on arrival"}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-muted)", display: "flex", alignItems: "center", gap: 4 }}>
+                  <Star size={11} fill="currentColor" /> {phase.trip.driverRating.toFixed(1)} · pays via {phase.trip.paymentMethod ?? "UPI"}
+                </div>
+              </div>
+              {phase.trip.driverPlate && (
+                <span className="plate-chip">{phase.trip.driverPlate}</span>
+              )}
+            </div>
+
+            <h3 style={{ fontSize: 20, margin: "12px 0 8px" }}>{stateLabel(phase.trip.state)}</h3>
+
+            {etaMin !== null && (
+              <p style={{ fontSize: 13, fontWeight: 700, color: "var(--primary)", marginBottom: 8 }}>
+                About {etaMin} min from pickup
+              </p>
+            )}
 
             {phase.trip.otp && (
               <div className="otp-display">
-                <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
-                  Start OTP for Driver
+                <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
+                  <KeyRound size={12} /> Start OTP for Driver
                 </div>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
                   {phase.trip.otp}
                 </div>
               </div>
+            )}
+
+            {PRE_START_STATES.includes(phase.trip.state) && (
+              <button
+                type="button"
+                className="use-location-btn"
+                style={{ marginTop: phase.trip.otp ? 0 : 12 }}
+                onClick={() => void handleRegenerateOtp()}
+              >
+                <RefreshCw size={14} /> Show new start code
+              </button>
             )}
 
             <div className="fare-box">
@@ -540,6 +761,34 @@ export default function Book(): React.ReactElement {
                 <strong>{formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}</strong>
               </div>
             </div>
+
+            {PRE_START_STATES.includes(phase.trip.state) && (
+              showCancelConfirm ? (
+                <div style={{ marginTop: 14 }}>
+                  <p style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>
+                    Cancel this ride? Your driver is already on the way.
+                  </p>
+                  <div className="row" style={{ gap: 10 }}>
+                    <NeoButton variant="red" fullWidth onClick={() => void confirmCancelTrip()}>
+                      Yes, cancel
+                    </NeoButton>
+                    <NeoButton variant="white" fullWidth onClick={() => setShowCancelConfirm(false)}>
+                      Keep ride
+                    </NeoButton>
+                  </div>
+                </div>
+              ) : (
+                <NeoButton
+                  variant="white"
+                  size="sm"
+                  fullWidth
+                  style={{ marginTop: 14 }}
+                  onClick={() => setShowCancelConfirm(true)}
+                >
+                  Cancel Ride
+                </NeoButton>
+              )
+            )}
           </NeoCard>
         )}
 
@@ -555,17 +804,85 @@ export default function Book(): React.ReactElement {
               Total paid: {formatINR(paisa(phase.trip.fareBreakdown.riderTotalPaise))}
             </p>
 
-            <NeoButton variant="primary" fullWidth onClick={reset}>
-              Book Another Ride 🚀
+            <div className="booking-divider"><span>RATE YOUR DRIVER</span></div>
+            {rated ? (
+              <div className="ok-text" style={{ marginBottom: 14 }}>
+                <CircleCheck size={14} /> Thanks — your rating helps other riders
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                <div className="star-row" role="radiogroup" aria-label="Driver rating">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      role="radio"
+                      aria-checked={ratingVal === n}
+                      aria-label={`${n} star${n > 1 ? "s" : ""}`}
+                      className={`star-btn ${n <= ratingVal ? "on" : ""}`}
+                      onClick={() => setRatingVal(n)}
+                    >
+                      <Star size={20} fill={n <= ratingVal ? "currentColor" : "none"} />
+                    </button>
+                  ))}
+                </div>
+                <NeoInput
+                  label="Add a note (optional)"
+                  placeholder="How was the ride?"
+                  value={ratingComment}
+                  maxLength={280}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                />
+                <NeoButton variant="primary" fullWidth onClick={() => void submitRating()}>
+                  Submit {ratingVal}-star rating
+                </NeoButton>
+              </div>
+            )}
+
+            <div className="booking-divider"><span>ADD A TIP</span></div>
+            {tipDone ? (
+              <div className="ok-text" style={{ marginBottom: 14 }}>
+                <CircleCheck size={14} /> Tip sent — 100% goes to your driver
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                <div className="row" style={{ gap: 8, justifyContent: "center", marginBottom: 10 }}>
+                  {[1000, 2000, 5000].map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`payment-pill ${tipPaise === p ? "selected" : ""}`}
+                      aria-pressed={tipPaise === p}
+                      onClick={() => setTipPaise((cur) => (cur === p ? 0 : p))}
+                    >
+                      +₹{p / 100}
+                    </button>
+                  ))}
+                </div>
+                <NeoButton
+                  variant="accent"
+                  fullWidth
+                  disabled={tipPaise === 0}
+                  onClick={() => void submitTip()}
+                >
+                  {tipPaise === 0 ? "Pick a tip amount" : `Send ${formatINR(paisa(tipPaise))} tip`}
+                </NeoButton>
+              </div>
+            )}
+
+            <NeoButton variant={rated ? "primary" : "white"} fullWidth onClick={reset}>
+              <Rocket size={15} /> Book Another Ride
             </NeoButton>
           </NeoCard>
         )}
+        </div>
       </div>
 
       {showCounterModal && activeDriverCounter && (
         <CounterModal
           counter={activeDriverCounter}
-          countdownSeconds={countdownSeconds}
+          vehicleClass={liveVehicleClass ?? ""}
+          platformFeePaise={livePlatformPaise}
           onAccept={() => setShowCounterModal(false)}
           onFinalOffer={() => setShowCounterModal(false)}
           onDecline={() => setShowCounterModal(false)}

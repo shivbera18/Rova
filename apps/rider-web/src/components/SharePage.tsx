@@ -48,6 +48,7 @@ export function SharePage(): React.ReactElement {
           if (!res.ok) {
             setError(String(json.message ?? "This journey link is not valid"));
             setView(null);
+            terminal = true; // dead links stay dead — stop polling
             return;
           }
           setError(null);

@@ -157,6 +157,9 @@ export const MIGRATIONS = [
       created_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id, phone)
     );
+    -- CREATE IF NOT EXISTS is a no-op on databases that predate this table's
+    -- position column — backfill it the same way as the label columns above.
+    ALTER TABLE safety_contacts ADD COLUMN IF NOT EXISTS position smallint NOT NULL DEFAULT 0;
     `,
   },
 ];

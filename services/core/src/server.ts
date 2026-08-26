@@ -1010,9 +1010,9 @@ export async function startServer(listenPort = PORT): Promise<{
           const cp = ch.codePointAt(0) ?? 0;
           return cp > 31 && cp !== 127 && cp !== 173;
         })
+        .slice(0, 80)
         .join("")
-        .trim()
-        .slice(0, 80);
+        .trim();
     const parsed: Array<{ name: string; phone: string }> = [];
     for (const c of list) {
       const name = cleanName(c.name);

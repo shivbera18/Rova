@@ -31,19 +31,30 @@ export async function createNegotiation(
   listPricePaise: Paise,
   platformFeePaise: Paise,
   paymentMethod: string,
-): Promise<NegotiationRow> {
+): Promise<{ negotiation: NegotiationRow; supersededRequestIds: string[] }> {
   const rules = await getNegotiationRules(sql, cityId);
   if (offerPaise < rules.hardFloorPaise) throw new NegotationError("OFFER_BELOW_HARD_FLOOR", "offer below floor");
   if (paymentMethod === "CASH" && offerPaise > rules.cashOfferCapPaise) {
     throw new NegotationError("CASH_CAP_EXCEEDED", `cash offers capped at ${rules.cashOfferCapPaise} paise`);
   }
 
-  // one active negotiation per rider per city — cancel any prior live one
-  await sql.query(
-    `UPDATE negotiations SET state='CANCELLED'
-     WHERE rider_id=$1 AND state IN ('BROADCASTING','COUNTERED_DRIVER','COUNTERED_RIDER')`,
+  // one active negotiation per rider per city — cancel any prior live one and
+  // retire its request row so stale MATCHING/NEGOTIATING rows don't accumulate
+  // with dispatch claims still held against them.
+  const superseded = await sql.query<{ request_id: string }>(
+    `UPDATE negotiations SET state='CANCELLED', version=version+1
+     WHERE rider_id=$1 AND state IN ('BROADCASTING','COUNTERED_DRIVER','COUNTERED_RIDER')
+     RETURNING request_id`,
     [riderId],
   );
+  const supersededRequestIds = [...new Set(superseded.rows.map((r) => r.request_id))];
+  for (const reqId of supersededRequestIds) {
+    await sql.query(
+      "UPDATE ride_requests SET state='CANCELLED', version=version+1 WHERE id=$1 AND state IN ('MATCHING','NEGOTIATING')",
+      [reqId],
+    );
+    await publish(TOPICS.negotiationEvent, { action: "RIDER_CANCEL", to: "CANCELLED", requestId: reqId });
+  }
 
   const id = randomUUID();
   const expiresAt = new Date(Date.now() + rules.offerStageTtlS * 1000);
@@ -55,7 +66,7 @@ export async function createNegotiation(
     [id, requestId, riderId, cityId, vehicleClass, offerPaise, listPricePaise, platformFeePaise, expiresAt],
   );
   await appendEvent(sql, id, "RIDER", "OFFER", offerPaise, 1);
-  return (await getNegotiation(sql, id))!;
+  return { negotiation: (await getNegotiation(sql, id))!, supersededRequestIds };
 }
 
 export async function getNegotiation(sql: SqlRowClient, id: string): Promise<NegotiationRow | null> {

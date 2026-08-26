@@ -395,7 +395,7 @@ export async function startServer(listenPort = PORT): Promise<{
     let negotiationId: string | undefined;
     let expiresAt: Date;
     if (negotiated) {
-      const neg = await createNegotiation(
+      const { negotiation, supersededRequestIds } = await createNegotiation(
         sql,
         requestId,
         sess.userId,
@@ -406,8 +406,12 @@ export async function startServer(listenPort = PORT): Promise<{
         platformContribution as never,
         body.paymentMethod!,
       );
-      negotiationId = neg.id;
-      expiresAt = new Date(neg.expires_at);
+      for (const reqId of supersededRequestIds) {
+        releaseClaim(reqId);
+        void cancelBroadcast(reqId);
+      }
+      negotiationId = negotiation.id;
+      expiresAt = new Date(negotiation.expires_at);
     } else {
       expiresAt = new Date(Date.now() + 90_000);
     }

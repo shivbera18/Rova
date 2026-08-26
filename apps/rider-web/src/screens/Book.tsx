@@ -54,6 +54,29 @@ type Phase =
 
 const ACTIVE_TRIP_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED", "ONGOING"];
 
+/** Ticks the start-code window so riders know when to regenerate. */
+function OtpExpiryHint({ expiresAt }: { expiresAt: string }): React.ReactElement {
+  const [text, setText] = useState<string>("");
+  useEffect(() => {
+    const tick = (): void => {
+      const ms = new Date(expiresAt).getTime() - Date.now();
+      setText(
+        ms <= 0
+          ? "Expired — tap “Show new start code”"
+          : `Valid for ${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`,
+      );
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => clearInterval(iv);
+  }, [expiresAt]);
+  return (
+    <div style={{ fontSize: 10.5, fontWeight: 800, color: text.startsWith("Expired") ? "#b91c1c" : "var(--ink-muted)" }}>
+      {text}
+    </div>
+  );
+}
+
 /** One-tap "save this driver" — idempotent server-side, safe to tap twice. */
 function SaveDriverButton({
   driverId,
@@ -874,6 +897,9 @@ export default function Book(): React.ReactElement {
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
                   {phase.trip.otp}
                 </div>
+                {phase.trip.otpExpiresAt && (
+                  <OtpExpiryHint expiresAt={phase.trip.otpExpiresAt} />
+                )}
               </div>
             )}
 

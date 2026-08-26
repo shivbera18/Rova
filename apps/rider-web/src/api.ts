@@ -116,6 +116,8 @@ export interface TripView {
   driverLng?: number;
   /** stars the caller already gave on this trip, when they rated */
   myRatingStars?: number;
+  /** start-code window for pre-start trips */
+  otpExpiresAt?: string;
   paymentMethod?: "WALLET" | "UPI" | "CASH";
   startedAt?: string;
   endedAt?: string;

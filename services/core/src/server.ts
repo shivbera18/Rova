@@ -303,7 +303,9 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!Number.isSafeInteger(amountPaise) || amountPaise! < 1000 || amountPaise! > 100_000) {
       fail(400, "INVALID_TOPUP", "top-up must be between ₹10 and ₹1,000");
     }
-    if (process.env.NODE_ENV === "production") {
+    if (!devAuthEnabled()) {
+      // Free money: only explicitly enabled dev/test environments may top up
+      // without a real payment gateway behind this endpoint.
       fail(501, "PAYMENT_PROVIDER_REQUIRED", "production top-up requires payment gateway confirmation");
     }
     const txn = await postTransaction(

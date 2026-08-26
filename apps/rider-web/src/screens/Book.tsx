@@ -559,14 +559,16 @@ export default function Book(): React.ReactElement {
                     <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-muted)" }}>
                       Balance: {walletBalance !== null ? formatINR(paisa(walletBalance)) : "…"}
                     </span>
-                    <button
-                      type="button"
-                      className="use-location-btn"
-                      style={{ padding: "4px 12px", width: "auto" }}
-                      onClick={() => void handleTopUp()}
-                    >
-                      + Add ₹500 (dev)
-                    </button>
+                    {import.meta.env.DEV && (
+                      <button
+                        type="button"
+                        className="use-location-btn"
+                        style={{ padding: "4px 12px", width: "auto" }}
+                        onClick={() => void handleTopUp()}
+                      >
+                        + Add ₹500 (dev)
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

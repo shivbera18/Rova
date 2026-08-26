@@ -180,7 +180,7 @@ export default function Book(): React.ReactElement {
     } else if (msg.t === "negotiation.counter") {
       setActiveDriverCounter({
         negotiationId: msg.negotiationId,
-        counterPaise: msg.paise,
+        paise: msg.paise,
         round: msg.round,
         expiresAt: msg.expiresAt,
       });
@@ -415,7 +415,7 @@ export default function Book(): React.ReactElement {
         <MapView
           pickup={pickup}
           drop={drop}
-          driverPos={liveDriverPos}
+          driver={liveDriverPos}
           onMapClick={onMapClick}
         />
       </div>
@@ -709,7 +709,7 @@ export default function Book(): React.ReactElement {
                   {phase.trip.driverName || "Driver details on arrival"}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-muted)", display: "flex", alignItems: "center", gap: 4 }}>
-                  <Star size={11} fill="currentColor" /> {phase.trip.driverRating.toFixed(1)} · pays via {phase.trip.paymentMethod ?? "UPI"}
+                  <Star size={11} fill="currentColor" /> {phase.trip.driverRating != null ? phase.trip.driverRating.toFixed(1) : "—"} · pays via {phase.trip.paymentMethod ?? "UPI"}
                 </div>
               </div>
               {phase.trip.driverPlate && (

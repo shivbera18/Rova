@@ -955,10 +955,28 @@ export async function startServer(listenPort = PORT): Promise<{
       "SELECT stars FROM ratings WHERE trip_id=$1 AND rater_id=$2",
       [id, sess.userId],
     );
+    // Pre-start trips surface the start-code window so driver/rider UIs can
+    // render the countdown and remaining attempts.
+    let otpWindow: Record<string, unknown> = {};
+    if (["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state)) {
+      const row = (
+        await sql.query<{ expires_at: Date; attempts: number }>(
+          "SELECT expires_at, attempts FROM otp_codes WHERE trip_id=$1",
+          [id],
+        )
+      ).rows[0];
+      if (row) {
+        otpWindow = {
+          otpExpiresAt: new Date(row.expires_at).toISOString(),
+          otpAttemptsLeft: Math.max(0, 3 - row.attempts),
+        };
+      }
+    }
     return {
       ...tripView(trip),
       riderName: trip.rider_name ?? undefined,
       ...(mine.rows[0] ? { myRatingStars: mine.rows[0].stars } : {}),
+      ...otpWindow,
     };
   });
 

@@ -116,7 +116,7 @@ export async function createTripFromAgreement(
   }
   await sql.query(
     "INSERT INTO otp_codes (trip_id, code_hash, expires_at) VALUES ($1,$2,$3)",
-    [id, hashOtp(id, otp), new Date(Date.now() + 6 * 3600_000)],
+    [id, hashOtp(id, otp), new Date(Date.now() + OTP_TTL_MS)],
   );
   releaseClaim(params.requestId);
 
@@ -164,18 +164,35 @@ export async function transitionTrip(
   return updated.rows[0]!;
 }
 
-/** Rider-read OTP check gates ARRIVED → ONGOING. Max 5 attempts. */
+/** Rider must start within 5 minutes of arrival; regenerate mints a fresh window. */
+export const OTP_TTL_MS = 5 * 60_000;
+const OTP_MAX_ATTEMPTS = 3;
+
+/** Rider-read OTP check gates ARRIVED → ONGOING. 5-minute TTL, max 3 attempts. */
 export async function verifyStartOtp(sql: SqlRowClient, tripId: string, otp: string): Promise<boolean> {
-  const r = await sql.query<{ code_hash: string; attempts: number }>(
-    "SELECT code_hash, attempts FROM otp_codes WHERE trip_id = $1",
+  const r = await sql.query<{ code_hash: string; attempts: number; expired: boolean }>(
+    "SELECT code_hash, attempts, expires_at < now() AS expired FROM otp_codes WHERE trip_id = $1",
     [tripId],
   );
   if (r.rows.length === 0) return false;
   const row = r.rows[0]!;
-  if (row.attempts >= 5) throw new TripError("OTP_LOCKED", "too many attempts");
+  if (row.expired) {
+    throw new TripError("OTP_EXPIRED", "start code expired — ask the rider to regenerate");
+  }
+  if (row.attempts >= OTP_MAX_ATTEMPTS) {
+    throw new TripError("OTP_LOCKED", "too many wrong attempts — ask the rider to regenerate");
+  }
   const ok = row.code_hash === hashOtp(tripId, otp);
   if (!ok) {
-    await sql.query("UPDATE otp_codes SET attempts = attempts + 1 WHERE trip_id = $1", [tripId]);
+    // Conditional UPDATE is the atomic attempt counter — concurrent guesses
+    // cannot race past the cap.
+    const bump = await sql.query<{ attempts: number }>(
+      "UPDATE otp_codes SET attempts = attempts + 1 WHERE trip_id = $1 AND attempts < $2 RETURNING attempts",
+      [tripId, OTP_MAX_ATTEMPTS],
+    );
+    if (bump.rows.length === 0) {
+      throw new TripError("OTP_LOCKED", "too many wrong attempts — ask the rider to regenerate");
+    }
   }
   return ok;
 }
@@ -190,7 +207,7 @@ export async function regenerateTripOtp(sql: SqlRowClient, tripId: string): Prom
   const newOtp = String(randomInt(100000, 999999));
   await sql.query(
     "UPDATE otp_codes SET code_hash=$2, attempts=0, expires_at=$3 WHERE trip_id=$1",
-    [tripId, hashOtp(tripId, newOtp), new Date(Date.now() + 6 * 3600_000)],
+    [tripId, hashOtp(tripId, newOtp), new Date(Date.now() + OTP_TTL_MS)],
   );
   return newOtp;
 }

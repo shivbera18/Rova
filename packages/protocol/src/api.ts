@@ -105,6 +105,9 @@ export interface TripView {
   pickup: LatLon;
   drop: LatLon;
   otp?: string;             // only ever delivered to the rider + assigned driver
+  /** start-code window for pre-start trips (driver/rider countdowns) */
+  otpExpiresAt?: string;
+  otpAttemptsLeft?: number;
   fareBreakdown: FareBreakdown;
   pickupLabel?: string;
   dropLabel?: string;

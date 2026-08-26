@@ -629,6 +629,8 @@ export default function Book(): React.ReactElement {
             quote={phase.quote}
             pickup={pickup}
             drop={drop}
+            pickupLabel={pickupLabel}
+            dropLabel={dropLabel}
             payMethod={payMethod}
             onClose={() => setPhase({ k: "quotes", quotes: [phase.quote] })}
             onBooked={(session) => {

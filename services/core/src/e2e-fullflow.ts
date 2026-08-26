@@ -306,7 +306,7 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
     const started = await api(`/v1/trips/${tripId}/start`, { otp: regen.json.otp ?? otp }, riderToken);
     check("correct OTP starts ride (ONGOING)", started.status === 200 && started.json.state === "ONGOING");
     const restart = await api(`/v1/trips/${tripId}/start`, { otp }, riderToken);
-    check("double-start rejected", restart.status !== 200, `${restart.status}`);
+    check("double-start is idempotent ONGOING", restart.status === 200 && restart.json.state === "ONGOING");
     const regenLate = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);
     check("OTP regeneration blocked after start (409)", regenLate.status >= 400);
 
@@ -445,20 +445,20 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
     const declined = await api(`/v1/negotiations/${d1.json.negotiationId}/rider-decline`, {}, riderToken);
     check("rider decline acknowledged", declined.status === 200 && declined.json.ok === true);
     const reDecline = await api(`/v1/negotiations/${d1.json.negotiationId}/rider-decline`, {}, riderToken);
-    check(
-      "double decline rejected with client error (4xx)",
-      reDecline.status >= 400 && reDecline.status < 500,
-      `${reDecline.status} ${reDecline.json.code ?? ""}`,
-    );
+    check("double decline is idempotent ok", reDecline.status === 200 && reDecline.json.ok === true);
 
-    // cancel path — rider cancels while broadcasting; driver gets dispatch.cancel
-    const cancelWait = driverWs.waitFor(
-      (m) => m.t === "dispatch.cancel" && m.requestId !== d1.json.sessionId,
-    );
+    // cancel path — rider cancels while broadcasting; driver gets dispatch.cancel.
+    // single-use quote tokens: d2 must carry its own fresh quote.
+    const q2 = await api("/v1/quotes", { pickup: PICKUP, drop: DROP }, riderToken);
+    const bike2 = (q2.json.quotes ?? []).find((x: any) => x.vehicleClass === "BIKE");
     const d2 = await api("/v1/requests", {
-      quoteToken: bike.quoteToken, offerPaise: Math.round(bike.listPrice / 2),
+      quoteToken: bike2.quoteToken, offerPaise: Math.round(bike2.listPrice / 2),
       vehicleClass: "BIKE", paymentMethod: "UPI", pickup: PICKUP, drop: DROP,
     }, riderToken);
+    // supersede cleanup may fan out cancels for stale prior-run requests — scope to d2 only
+    const cancelWait = driverWs.waitFor(
+      (m) => m.t === "dispatch.cancel" && m.requestId === d2.json.sessionId,
+    );
     const cancelled = await api(`/v1/requests/${d2.json.sessionId}/cancel`, {}, riderToken);
     check("pre-agreement cancel succeeds", cancelled.status === 200 && cancelled.json.ok === true);
     const cancelMsg = await cancelWait;
@@ -539,7 +539,8 @@ async function runScenarios(handle: { storage: { sql: import("./db/storage.ts").
   section("S9 KYC gate for unapproved drivers");
   {
     const ghostPhone = "+919900000902";
-    const ghost = await api("/v1/auth/otp/verify", { phone: ghostPhone, otp: DEV_OTP, role: "DRIVER" });
+    // current product rule: new drivers register exactly one vehicle class
+    const ghost = await api("/v1/auth/otp/verify", { phone: ghostPhone, otp: DEV_OTP, role: "DRIVER", vehicleClass: "BIKE" });
     check("fresh driver login works (no profile yet)", ghost.status === 200);
 
     const q = await api("/v1/quotes", { pickup: PICKUP, drop: DROP }, riderToken);

@@ -1408,7 +1408,7 @@ export async function startServer(listenPort = PORT): Promise<{
       await sql.query(
         `INSERT INTO ratings (id, trip_id, rater_id, ratee_id, stars, comment)
          VALUES ($1,$2,$3,$4,$5,$6)`,
-        [randomUUID(), id, sess.userId, rateeId, Math.round(stars), comment ?? null],
+        [randomUUID(), id, sess.userId, rateeId, stars, comment ?? null],
       );
       const average = await sql.query<{ avg: string }>(
         "SELECT AVG(stars)::text AS avg FROM ratings WHERE ratee_id=$1",

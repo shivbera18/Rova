@@ -3,6 +3,8 @@
  *   navigations            network-first  -> cached page -> cached "/" -> /offline.html
  *   hashed static assets   stale-while-revalidate
  *   /v1/* API              never intercepted (money data must be fresh)
+ * Bump VERSION whenever precached files (/, offline.html, manifest, icons)
+ * change so clients pick up a fresh shell on their next visit.
  */
 const VERSION = "v2";
 const CACHE = `chalox-driver-${VERSION}`;

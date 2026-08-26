@@ -1,4 +1,17 @@
 import { useState } from "react";
+import {
+  ArrowDown,
+  ArrowRight,
+  Bike,
+  CarFront,
+  CarTaxiFront,
+  Car,
+  Flame,
+  Menu,
+  Rocket,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import { NeoButton, NeoCard, NeoBadge, NeoAccordion, NeoMarquee } from "./NeoComponents";
 
 export function DriverLanding({
@@ -110,7 +123,7 @@ export function DriverLanding({
                 size="sm"
                 onClick={onSwitchPortal}
               >
-                🚗 Rider Portal
+                <CarFront size={14} /> Rider Portal
               </NeoButton>
             )}
             <NeoButton
@@ -129,7 +142,7 @@ export function DriverLanding({
             onClick={() => setMobileMenuOpen((prev) => !prev)}
             aria-label="Toggle menu"
           >
-            {mobileMenuOpen ? "✕" : "☰"}
+            {mobileMenuOpen ? <X size={15} /> : <Menu size={15} />}
           </button>
         </div>
 
@@ -167,7 +180,7 @@ export function DriverLanding({
                   onSwitchPortal();
                 }}
               >
-                🚗 Rider Portal
+                <CarFront size={14} /> Rider Portal
               </NeoButton>
             )}
             <NeoButton
@@ -187,7 +200,7 @@ export function DriverLanding({
       {/* ============ PRE-BUILT NEOMARQUEE ============ */}
       <NeoMarquee
         items={[
-          "💰 0% Driver Commission",
+          "0% Driver Commission",
           "Keep 100% of agreed fare",
           "Accept or Counter any offer",
           "Instant Daily settlements",
@@ -211,7 +224,7 @@ export function DriverLanding({
       >
         <div style={{ flex: "1 1 480px", maxWidth: 640 }}>
           <NeoBadge variant="green" style={{ marginBottom: 18, display: "inline-flex" }}>
-            🔥 100% Direct Driver Take-Home
+            <Flame size={13} /> 100% Direct Driver Take-Home
           </NeoBadge>
 
           <h1 style={{ fontSize: "clamp(38px, 5.5vw, 64px)", lineHeight: 1.05, margin: "14px 0 20px" }}>
@@ -244,22 +257,22 @@ export function DriverLanding({
               onClick={onGetStarted}
               style={{ boxShadow: "var(--shadow-md)" }}
             >
-              🚀 Launch Driver Radar
+              <Rocket size={16} /> Launch Driver Radar
             </NeoButton>
             <a
               href="#calc"
               className="brut-btn brut-btn-white"
               style={{ fontSize: 15, padding: "13px 22px" }}
             >
-              Calculate Earnings ↓
+              Calculate Earnings <ArrowDown size={15} />
             </a>
           </div>
 
           <div className="row" style={{ gap: 8, marginTop: 32, flexWrap: "wrap" }}>
-            <NeoBadge>🏍️ Bike Taxi</NeoBadge>
-            <NeoBadge>🛺 Auto Rickshaw</NeoBadge>
-            <NeoBadge>🚗 Mini & Prime Cabs</NeoBadge>
-            <NeoBadge variant="green">⚡ Instant OTP Verification</NeoBadge>
+            <NeoBadge><Bike size={12} /> Bike Taxi</NeoBadge>
+            <NeoBadge><CarTaxiFront size={12} /> Auto Rickshaw</NeoBadge>
+            <NeoBadge><Car size={12} /> Mini & Prime Cabs</NeoBadge>
+            <NeoBadge variant="green"><ShieldCheck size={12} /> Instant OTP Verification</NeoBadge>
           </div>
         </div>
 
@@ -267,7 +280,7 @@ export function DriverLanding({
         <div style={{ flex: "0 1 360px", width: "100%", margin: "0 auto" }}>
           <NeoCard elevation="lg" style={{ padding: 24, borderRadius: "var(--radius-lg)" }}>
             <div className="spread" style={{ marginBottom: 14 }}>
-              <NeoBadge variant="green">● RADAR ACTIVE</NeoBadge>
+              <NeoBadge variant="green">RADAR ACTIVE</NeoBadge>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-muted)" }}>BENGALURU</span>
             </div>
 
@@ -300,7 +313,7 @@ export function DriverLanding({
               onClick={onGetStarted}
               style={{ marginTop: 18 }}
             >
-              Go Online Now →
+              Go Online Now <ArrowRight size={15} />
             </NeoButton>
           </NeoCard>
         </div>

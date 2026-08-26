@@ -46,6 +46,8 @@ import {
 import {
   createTripFromAgreement,
   getTrip,
+  OTP_MAX_ATTEMPTS,
+  OTP_TTL_MS,
   readFareJson,
   regenerateTripOtp,
   settleTrip,
@@ -966,9 +968,12 @@ export async function startServer(listenPort = PORT): Promise<{
         )
       ).rows[0];
       if (row) {
+        const expiresAt = new Date(row.expires_at);
         otpWindow = {
-          otpExpiresAt: new Date(row.expires_at).toISOString(),
-          otpAttemptsLeft: Math.max(0, 3 - row.attempts),
+          otpExpiresAt: expiresAt.toISOString(),
+          otpExpiresInMs: Math.max(0, expiresAt.getTime() - Date.now()),
+          otpAttemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - row.attempts),
+          otpAttemptsMax: OTP_MAX_ATTEMPTS,
         };
       }
     }
@@ -986,8 +991,22 @@ export async function startServer(listenPort = PORT): Promise<{
     const trip = await getTrip(sql, id);
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
     if (trip.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
+    enforceRateLimit(`otp-regen:${id}`, 10, 5 * 60_000);
     try {
-      return { otp: await regenerateTripOtp(sql, id) };
+      const otp = await regenerateTripOtp(sql, id);
+      // Hand back the fresh window so the rider UI re-anchors immediately
+      // instead of showing "Expired" under a brand-new code until the next poll.
+      const row = (
+        await sql.query<{ expires_at: Date }>("SELECT expires_at FROM otp_codes WHERE trip_id=$1", [id])
+      ).rows[0];
+      const expiresAt = row ? new Date(row.expires_at) : new Date(Date.now() + OTP_TTL_MS);
+      return {
+        otp,
+        otpExpiresAt: expiresAt.toISOString(),
+        otpExpiresInMs: Math.max(0, expiresAt.getTime() - Date.now()),
+        otpAttemptsLeft: OTP_MAX_ATTEMPTS,
+        otpAttemptsMax: OTP_MAX_ATTEMPTS,
+      };
     } catch (err) {
       if (err instanceof TripError) fail(409, err.code, err.message);
       throw err;
@@ -1252,7 +1271,18 @@ export async function startServer(listenPort = PORT): Promise<{
     });
 
     const view = tripView({ ...trip, otpPlain: otp });
-    pushRider(rr.rider_id, { t: "driver.assigned", trip: { ...view, otp } as never });
+    // Carry the start-code window on the assignment frame so the rider's hint
+    // renders immediately and matches what GET /v1/trips/:id will report.
+    pushRider(rr.rider_id, {
+      t: "driver.assigned",
+      trip: {
+        ...view,
+        otp,
+        otpExpiresInMs: OTP_TTL_MS,
+        otpAttemptsLeft: OTP_MAX_ATTEMPTS,
+        otpAttemptsMax: OTP_MAX_ATTEMPTS,
+      } as never,
+    });
     void sendPush(sql, rr.rider_id, {
       title: "Your driver is confirmed",
       body: `Driver accepted ₹${(agreed / 100).toFixed(2)}. Open Chalo-X for the start OTP.`,

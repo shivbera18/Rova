@@ -100,18 +100,22 @@ function RateRiderCard({ trip, onDone }: { trip: TripView; onDone: () => void })
   );
 }
 
-/** Ticks once a second against the start-code expiry; null when no window. */
-function useOtpCountdown(expiresAt?: string): { text: string | null; expired: boolean } {
+/** Ticks once a second against the start-code window; anchored on the
+ *  server-sent remaining milliseconds so a skewed device clock can't lie. */
+function useOtpCountdown(expiresInMs?: number): { text: string | null; expired: boolean } {
   const [state, setState] = useState<{ text: string | null; expired: boolean }>({ text: null, expired: false });
   useEffect(() => {
-    if (!expiresAt) {
+    if (expiresInMs == null) {
       setState({ text: null, expired: false });
       return;
     }
+    const deadline = performance.now() + expiresInMs;
+    let iv: ReturnType<typeof setInterval> | null = null;
     const tick = (): void => {
-      const ms = new Date(expiresAt).getTime() - Date.now();
+      const ms = deadline - performance.now();
       if (ms <= 0) {
-        setState({ text: "0:00", expired: true });
+        setState((prev) => (prev.expired ? prev : { text: "0:00", expired: true }));
+        if (iv) clearInterval(iv);
         return;
       }
       setState({
@@ -120,19 +124,28 @@ function useOtpCountdown(expiresAt?: string): { text: string | null; expired: bo
       });
     };
     tick();
-    const iv = setInterval(tick, 1000);
-    return () => clearInterval(iv);
-  }, [expiresAt]);
+    iv = setInterval(tick, 1000);
+    return () => {
+      if (iv) clearInterval(iv);
+    };
+  }, [expiresInMs]);
   return state;
 }
 
-function OtpWindowBar({ trip }: { trip: TripView }): React.ReactElement | null {
-  const { text, expired } = useOtpCountdown(trip.otpExpiresAt);
+function OtpWindowBar({
+  trip,
+  text,
+  expired,
+}: {
+  trip: TripView;
+  text: string | null;
+  expired: boolean;
+}): React.ReactElement | null {
   if (!text) return null;
   const locked = trip.otpAttemptsLeft === 0;
+  const max = trip.otpAttemptsMax ?? 3;
   return (
     <div
-      role="status"
       className="row"
       style={{
         gap: 6,
@@ -147,33 +160,26 @@ function OtpWindowBar({ trip }: { trip: TripView }): React.ReactElement | null {
     >
       <Timer size={13} color={expired || locked ? "#dc2626" : "var(--primary)"} />
       {expired ? (
-        <span style={{ color: "#b91c1c" }}>Start code expired — ask the rider to regenerate it</span>
+        <span role="status" style={{ color: "#b91c1c" }}>
+          Start code expired — ask the rider to tap “Show new start code”
+        </span>
       ) : locked ? (
-        <span style={{ color: "#b91c1c" }}>Locked after 3 wrong attempts — ask the rider to regenerate</span>
+        <span role="status" style={{ color: "#b91c1c" }}>
+          Locked after {max} wrong attempts — ask the rider to regenerate
+        </span>
       ) : (
-        <>
+        // Numerals change every second: keep them out of the live region.
+        <span aria-hidden style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
           <span>Code valid for</span>
-          <strong style={{ color: text === "0:00" || text.startsWith("0:") ? "#b91c1c" : "var(--ink)" }}>{text}</strong>
+          <strong style={{ color: text.startsWith("0:") ? "#b91c1c" : "var(--ink)" }}>{text}</strong>
           <span>·</span>
-          <span>{trip.otpAttemptsLeft} of 3 attempts left</span>
-        </>
+          <span>
+            {trip.otpAttemptsLeft} of {max} attempts left
+          </span>
+        </span>
       )}
     </div>
   );
-}
-
-/** Disables OTP entry once the window closes — recovery is regeneration, not retry. */
-function OtpGate({ trip, children }: { trip: TripView; children: React.ReactNode }): React.ReactElement {
-  const { expired } = useOtpCountdown(trip.otpExpiresAt);
-  const locked = trip.otpAttemptsLeft === 0;
-  if (expired || locked) {
-    return (
-      <div style={{ opacity: 0.55 }} aria-disabled>
-        {children}
-      </div>
-    );
-  }
-  return <>{children}</>;
 }
 
 export function TripPanel({
@@ -214,6 +220,9 @@ export function TripPanel({
     }
   }
 
+  // Hook must run before the early return below — one ticker for the whole card.
+  const { text: otpText, expired: otpExpired } = useOtpCountdown(trip?.otpExpiresInMs);
+
   if (!trip) {
     return (
       <NeoCard elevation="lg" className="trip-panel-overlay" style={{ padding: 22, background: "#ffffff" }}>
@@ -224,6 +233,7 @@ export function TripPanel({
   }
 
   const fare = trip.fareBreakdown;
+  const windowClosed = otpExpired || trip.otpAttemptsLeft === 0;
   const isPickupPhase = trip.state === "DRIVER_ASSIGNED" || trip.state === "ARRIVING";
   const navTarget = isPickupPhase ? trip.pickup : trip.drop;
 
@@ -307,25 +317,25 @@ export function TripPanel({
 
       {trip.state === "ARRIVED" && (
         <div style={{ margin: "8px 0" }}>
-          <OtpWindowBar trip={trip} />
+          <OtpWindowBar trip={trip} text={otpText} expired={otpExpired} />
           <NeoInput
-            label="Passenger's 4-Digit Start OTP"
+            label="Passenger's 6-digit start code"
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-            placeholder="····"
+            placeholder="······"
             inputMode="numeric"
+            disabled={windowClosed}
             autoFocus
           />
-          <OtpGate trip={trip}>
-            <NeoButton
-              variant="green"
-              fullWidth
-              disabled={busy || otp.length < 4}
-              onClick={() => act(() => api.startTrip(trip.id, otp))}
-            >
-              Start Trip (Verify OTP) <KeyRound size={15} />
-            </NeoButton>
-          </OtpGate>
+          <NeoButton
+            variant="green"
+            fullWidth
+            disabled={busy || otp.length !== 6 || windowClosed}
+            aria-disabled={windowClosed}
+            onClick={() => act(() => api.startTrip(trip.id, otp))}
+          >
+            Start Trip (Verify OTP) <KeyRound size={15} />
+          </NeoButton>
         </div>
       )}
 

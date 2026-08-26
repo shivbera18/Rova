@@ -107,7 +107,10 @@ export interface TripView {
   otp?: string;             // only ever delivered to the rider + assigned driver
   /** start-code window for pre-start trips (driver/rider countdowns) */
   otpExpiresAt?: string;
+  /** server-computed remaining window: clients anchor on this, never on their own clock */
+  otpExpiresInMs?: number;
   otpAttemptsLeft?: number;
+  otpAttemptsMax?: number;
   fareBreakdown: FareBreakdown;
   pickupLabel?: string;
   dropLabel?: string;

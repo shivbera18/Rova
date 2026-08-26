@@ -430,6 +430,7 @@ export default function Book(): React.ReactElement {
 
   function reset(): void {
     stopPoll();
+    localStorage.removeItem("chalox.rider.trip");
     setPickup(null);
     setPickupLabel("");
     setDrop(null);
@@ -437,6 +438,16 @@ export default function Book(): React.ReactElement {
     setError(null);
     setPhase({ k: "pick" });
   }
+
+  // Remember the in-flight trip so the safety centre can share its live link.
+  useEffect(() => {
+    if ((phase.k === "trip" || phase.k === "done") && !["CANCELLED_RIDER", "CANCELLED_DRIVER"].includes(phase.trip.state)) {
+      localStorage.setItem(
+        "chalox.rider.trip",
+        JSON.stringify({ id: phase.trip.id, state: phase.trip.state }),
+      );
+    }
+  }, [phase]);
 
   return (
     <div className="book-wrap">

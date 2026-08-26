@@ -49,6 +49,8 @@ type Phase =
   | { k: "trip"; trip: TripView }
   | { k: "done"; trip: TripView };
 
+const ACTIVE_TRIP_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED", "ONGOING"];
+
 interface StoredRoute {
   id: string;
   label: string;
@@ -161,6 +163,31 @@ export default function Book(): React.ReactElement {
     void getWallet()
       .then((w) => setWalletBalance(w.balancePaise))
       .catch(() => undefined);
+  }, []);
+
+  // Reload recovery: an in-flight trip must survive a page refresh.
+  useEffect(() => {
+    let stale = false;
+    void (async () => {
+      try {
+        const { trips } = await listTrips();
+        const active = trips.find((t) => ACTIVE_TRIP_STATES.includes(t.state));
+        if (!active || stale) return;
+        const full = await getTrip(active.id);
+        if (stale || !ACTIVE_TRIP_STATES.includes(full.state)) return;
+        setLiveDriverPos(
+          full.driverLat != null && full.driverLng != null
+            ? { lat: full.driverLat, lng: full.driverLng }
+            : null,
+        );
+        setPhase({ k: "trip", trip: full });
+      } catch {
+        // stay on the booking sheet; the user can book normally
+      }
+    })();
+    return () => {
+      stale = true;
+    };
   }, []);
 
   async function handleTopUp(): Promise<void> {

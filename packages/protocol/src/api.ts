@@ -105,6 +105,14 @@ export interface TripView {
   pickup: LatLon;
   drop: LatLon;
   otp?: string;             // only ever delivered to the rider + assigned driver
+  /** start-code window — only present once the driver is AT the pickup */
+  otpExpiresAt?: string;
+  /** server-computed remaining window: clients anchor on this, never on their own clock */
+  otpExpiresInMs?: number;
+  otpAttemptsLeft?: number;
+  otpAttemptsMax?: number;
+  /** pre-arrival: the code is valid but not yet on a timer */
+  otpWindowOpensOnArrival?: boolean;
   fareBreakdown: FareBreakdown;
   pickupLabel?: string;
   dropLabel?: string;

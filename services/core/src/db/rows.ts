@@ -108,6 +108,11 @@ export interface TripRow {
   drop_label?: string | null;
   /** joined rider display name */
   rider_name?: string | null;
+  /** joined start-code window */
+  otp_expires_at?: Date | null;
+  otp_attempts?: number | null;
+  /** db-computed remaining window in ms (never derived from the app clock) */
+  otp_expires_in_ms?: string | number | null;
   /** minted on demand for live journey sharing */
   share_token?: string | null;
 }

@@ -115,8 +115,9 @@ export async function createTripFromAgreement(
     throw new TripError("REQUEST_NOT_OPEN", "ride request was cancelled or superseded before agreement");
   }
   await sql.query(
-    "INSERT INTO otp_codes (trip_id, code_hash, expires_at) VALUES ($1,$2,$3)",
-    [id, hashOtp(id, otp), new Date(Date.now() + 6 * 3600_000)],
+    `INSERT INTO otp_codes (trip_id, code_hash, expires_at)
+     VALUES ($1, $2, now() + interval '12 hours')`,
+    [id, hashOtp(id, otp)],
   );
   releaseClaim(params.requestId);
 
@@ -127,9 +128,13 @@ export async function createTripFromAgreement(
 
 export async function getTrip(sql: SqlRowClient, tripId: string): Promise<TripRow | null> {
   const r = await sql.query<TripRow>(
-    `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label, ru.full_name AS rider_name FROM trips t
+    `SELECT t.*, r.payment_method, r.pickup_label, r.drop_label, ru.full_name AS rider_name,
+            o.expires_at AS otp_expires_at, o.attempts AS otp_attempts,
+            (EXTRACT(EPOCH FROM (o.expires_at - now())) * 1000)::bigint AS otp_expires_in_ms
+     FROM trips t
      JOIN ride_requests r ON r.id=t.request_id
      JOIN users ru ON ru.id = t.rider_id
+     LEFT JOIN otp_codes o ON o.trip_id = t.id
      WHERE t.id=$1`,
     [tripId],
   );
@@ -160,39 +165,88 @@ export async function transitionTrip(
   );
   if (updated.rows.length === 0) throw new TripError("CONCURRENT_UPDATE", "retry");
 
+  // The start-code window opens when the driver actually reaches the pickup —
+  // that is the moment the code has to be typed — and each arrival gets a
+  // clean attempt budget.
+  if (to === "ARRIVED") {
+    await sql.query(
+      `UPDATE otp_codes SET expires_at = now() + ($2 || ' milliseconds')::interval, attempts = 0
+       WHERE trip_id = $1`,
+      [tripId, String(OTP_TTL_MS)],
+    );
+  }
+
   await publish(TOPICS.tripStateChanged, { tripId, state: to });
   return updated.rows[0]!;
 }
 
-/** Rider-read OTP check gates ARRIVED → ONGOING. Max 5 attempts. */
+/**
+ * Start-code policy: the 5-minute window opens on ARRIVED (see transitionTrip)
+ * and on every regeneration. The row minted at assignment carries a far-future
+ * backstop expiry — it is never a countdown, because nobody is typing a code
+ * while the driver is still en route. Brute-force exposure is unchanged: the
+ * 3-attempt cap is independent of expiry.
+ */
+export const OTP_TTL_MS = 5 * 60_000;
+export const OTP_MAX_ATTEMPTS = 3;
+
+/** Rider-read OTP check gates ARRIVED → ONGOING. 5-minute window, max 3 attempts. */
 export async function verifyStartOtp(sql: SqlRowClient, tripId: string, otp: string): Promise<boolean> {
-  const r = await sql.query<{ code_hash: string; attempts: number }>(
-    "SELECT code_hash, attempts FROM otp_codes WHERE trip_id = $1",
+  const r = await sql.query<{ code_hash: string; attempts: number; expired: boolean }>(
+    "SELECT code_hash, attempts, expires_at < now() AS expired FROM otp_codes WHERE trip_id = $1",
     [tripId],
   );
   if (r.rows.length === 0) return false;
   const row = r.rows[0]!;
-  if (row.attempts >= 5) throw new TripError("OTP_LOCKED", "too many attempts");
+  if (row.expired) {
+    throw new TripError("OTP_EXPIRED", "start code expired — ask the rider to regenerate");
+  }
+  if (row.attempts >= OTP_MAX_ATTEMPTS) {
+    throw new TripError("OTP_LOCKED", "too many wrong attempts — ask the rider to regenerate");
+  }
   const ok = row.code_hash === hashOtp(tripId, otp);
   if (!ok) {
-    await sql.query("UPDATE otp_codes SET attempts = attempts + 1 WHERE trip_id = $1", [tripId]);
+    // Conditional UPDATE is the atomic attempt counter — concurrent guesses
+    // cannot race past the cap.
+    const bump = await sql.query<{ attempts: number }>(
+      "UPDATE otp_codes SET attempts = attempts + 1 WHERE trip_id = $1 AND attempts < $2 RETURNING attempts",
+      [tripId, OTP_MAX_ATTEMPTS],
+    );
+    if (bump.rows.length === 0) {
+      throw new TripError("OTP_LOCKED", "too many wrong attempts — ask the rider to regenerate");
+    }
   }
   return ok;
 }
 
-/** On-demand OTP re-generation for the rider pre-ride (C5 fix: zero plaintext OTPs at rest). */
-export async function regenerateTripOtp(sql: SqlRowClient, tripId: string): Promise<string> {
+/** On-demand OTP re-generation for the rider pre-ride (C5 fix: zero plaintext OTPs at rest).
+ *  Only a driver waiting at the pickup gets a timed window — regenerating while
+ *  they are still en route mints the same backstop assignment uses. */
+export async function regenerateTripOtp(
+  sql: SqlRowClient,
+  tripId: string,
+): Promise<{ otp: string; expiresInMs: number | null }> {
   const trip = await getTrip(sql, tripId);
   if (!trip) throw new TripError("NOT_FOUND", "trip does not exist");
   if (!["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED"].includes(trip.state)) {
     throw new TripError("INVALID_STATE", "cannot regenerate OTP after trip has started");
   }
   const newOtp = String(randomInt(100000, 999999));
-  await sql.query(
-    "UPDATE otp_codes SET code_hash=$2, attempts=0, expires_at=$3 WHERE trip_id=$1",
-    [tripId, hashOtp(tripId, newOtp), new Date(Date.now() + 6 * 3600_000)],
+  const atPickup = trip.state === "ARRIVED";
+  const updated = await sql.query<{ ms: string | number }>(
+    `UPDATE otp_codes
+     SET code_hash=$2, attempts=0, expires_at = now() + ($3)::interval
+     WHERE trip_id=$1
+     RETURNING (EXTRACT(EPOCH FROM (expires_at - now())) * 1000)::bigint AS ms`,
+    [tripId, hashOtp(tripId, newOtp), atPickup ? `${OTP_TTL_MS} milliseconds` : "12 hours"],
   );
-  return newOtp;
+  if (updated.rows.length === 0) {
+    throw new TripError("OTP_MISSING", "no start code record for this trip");
+  }
+  return {
+    otp: newOtp,
+    expiresInMs: atPickup ? Math.max(0, Number(updated.rows[0]!.ms)) : null,
+  };
 }
 
 export interface SettlementResult {

@@ -194,6 +194,16 @@ h4 {
   box-shadow: var(--shadow-sm);
 }
 
+/* A disabled field must look unusable — the start-code input is disabled
+   whenever its window is expired or locked. */
+.brut-input:disabled,
+.otp-input:disabled {
+  background: var(--paper-subtle);
+  color: var(--ink-muted);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .otp-input {
   font-family: var(--font-display);
   font-size: 26px;

@@ -54,6 +54,90 @@ type Phase =
 
 const ACTIVE_TRIP_STATES = ["DRIVER_ASSIGNED", "ARRIVING", "ARRIVED", "ONGOING"];
 
+/** Start-code block: shows the digits only while they can actually be used. */
+function StartCodeBlock({
+  otp,
+  expiresInMs,
+  attemptsLeft,
+  windowOpensOnArrival,
+  onRegenerate,
+}: {
+  otp: string;
+  expiresInMs?: number;
+  attemptsLeft?: number;
+  windowOpensOnArrival?: boolean;
+  onRegenerate: () => void;
+}): React.ReactElement {
+  const [remaining, setRemaining] = useState<number | null>(expiresInMs ?? null);
+  useEffect(() => {
+    if (expiresInMs == null) {
+      setRemaining(null);
+      return;
+    }
+    const deadline = performance.now() + expiresInMs;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const tick = (): void => {
+      const ms = Math.max(0, deadline - performance.now());
+      setRemaining(ms);
+      if (ms === 0 && iv) clearInterval(iv);
+    };
+    tick();
+    iv = setInterval(tick, 1000);
+    return () => {
+      if (iv) clearInterval(iv);
+    };
+  }, [expiresInMs]);
+
+  const expired = remaining != null && remaining <= 0;
+  const locked = attemptsLeft === 0;
+
+  // A stale code that the server will always reject must not stay on screen —
+  // people read the digits, not the caveat underneath them.
+  if (expired || locked) {
+    return (
+      <div className="otp-display" style={{ borderColor: "#b91c1c" }} role="status">
+        <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "#b91c1c" }}>
+          <KeyRound size={12} /> {locked ? "Code locked" : "Code expired"}
+        </div>
+        <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "6px 0 8px" }}>
+          {locked
+            ? "Three wrong tries were entered. Generate a new code for your driver."
+            : "Your start code timed out. Generate a new one for your driver."}
+        </p>
+        <NeoButton variant="primary" size="sm" onClick={onRegenerate}>
+          <RefreshCw size={14} /> Show new start code
+        </NeoButton>
+      </div>
+    );
+  }
+
+  const mmss =
+    remaining == null
+      ? null
+      : `${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}`;
+
+  return (
+    <div className="otp-display">
+      <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
+        <KeyRound size={12} /> Start OTP for Driver
+      </div>
+      <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
+        {otp}
+      </div>
+      {mmss ? (
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--ink-muted)" }}>
+          <span aria-hidden>Valid for {mmss}</span>
+          {attemptsLeft != null ? <span> · {attemptsLeft} tries left</span> : null}
+        </div>
+      ) : windowOpensOnArrival ? (
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--ink-muted)" }}>
+          Your driver will ask for this at pickup
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** One-tap "save this driver" — idempotent server-side, safe to tap twice. */
 function SaveDriverButton({
   driverId,
@@ -237,11 +321,26 @@ export default function Book(): React.ReactElement {
             ? { lat: full.driverLat, lng: full.driverLng }
             : null,
         );
-        // tripView omits the OTP by design — mint a fresh one for pre-start rides
-        const otp = PRE_START_STATES.includes(full.state)
-          ? await regenerateTripOtp(full.id).then((r) => r.otp).catch(() => undefined)
-          : undefined;
-        setPhase({ k: "trip", trip: otp ? { ...full, otp } : full });
+        // tripView omits the OTP by design. Re-issue one only while the driver is
+        // still en route — never at the pickup, where rotating the code would
+        // reset a window the driver is actively typing into.
+        const reissue =
+          PRE_START_STATES.includes(full.state) && full.state !== "ARRIVED"
+            ? await regenerateTripOtp(full.id).catch(() => undefined)
+            : undefined;
+        setPhase({
+          k: "trip",
+          trip: reissue
+            ? {
+                ...full,
+                otp: reissue.otp,
+                otpExpiresInMs: reissue.otpExpiresInMs,
+                otpAttemptsLeft: reissue.otpAttemptsLeft,
+                otpAttemptsMax: reissue.otpAttemptsMax,
+                otpWindowOpensOnArrival: reissue.otpWindowOpensOnArrival,
+              }
+            : full,
+        });
       } catch {
         // stay on the booking sheet; the user can book normally
       }
@@ -451,8 +550,23 @@ export default function Book(): React.ReactElement {
   async function handleRegenerateOtp(): Promise<void> {
     if (phase.k !== "trip") return;
     try {
-      const { otp } = await regenerateTripOtp(phase.trip.id);
-      setPhase((p) => (p.k === "trip" ? { ...p, trip: { ...p.trip, otp } } : p));
+      const fresh = await regenerateTripOtp(phase.trip.id);
+      setPhase((p) =>
+        p.k === "trip"
+          ? {
+              ...p,
+              trip: {
+                ...p.trip,
+                otp: fresh.otp,
+                otpExpiresAt: undefined,
+                otpExpiresInMs: fresh.otpExpiresInMs,
+                otpAttemptsLeft: fresh.otpAttemptsLeft,
+                otpAttemptsMax: fresh.otpAttemptsMax,
+                otpWindowOpensOnArrival: fresh.otpWindowOpensOnArrival,
+              },
+            }
+          : p,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate a new code");
     }
@@ -866,15 +980,14 @@ export default function Book(): React.ReactElement {
               </p>
             )}
 
-            {phase.trip.otp && (
-              <div className="otp-display">
-                <div className="row" style={{ justifyContent: "center", gap: 5, fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--primary)" }}>
-                  <KeyRound size={12} /> Start OTP for Driver
-                </div>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 900, letterSpacing: "0.15em", color: "var(--ink)" }}>
-                  {phase.trip.otp}
-                </div>
-              </div>
+            {phase.trip.otp && PRE_START_STATES.includes(phase.trip.state) && (
+              <StartCodeBlock
+                otp={phase.trip.otp}
+                expiresInMs={phase.trip.otpExpiresInMs}
+                attemptsLeft={phase.trip.otpAttemptsLeft}
+                windowOpensOnArrival={phase.trip.otpWindowOpensOnArrival}
+                onRegenerate={() => void handleRegenerateOtp()}
+              />
             )}
 
             {PRE_START_STATES.includes(phase.trip.state) && (

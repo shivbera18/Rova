@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatINR, paisa, type TripView } from "@chalo/protocol";
-import { Flag, KeyRound, MapPin, Navigation, Rocket, Star, TriangleAlert } from "lucide-react";
+import { Flag, KeyRound, MapPin, Navigation, Rocket, Star, Timer, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "./api";
 import { NeoCard, NeoButton, NeoBadge, NeoInput } from "./NeoComponents";
 
@@ -100,6 +100,88 @@ function RateRiderCard({ trip, onDone }: { trip: TripView; onDone: () => void })
   );
 }
 
+/** Ticks once a second against the start-code window; anchored on the
+ *  server-sent remaining milliseconds so a skewed device clock can't lie. */
+function useOtpCountdown(expiresInMs?: number): { text: string | null; expired: boolean } {
+  const [state, setState] = useState<{ text: string | null; expired: boolean }>({ text: null, expired: false });
+  useEffect(() => {
+    if (expiresInMs == null) {
+      setState({ text: null, expired: false });
+      return;
+    }
+    const deadline = performance.now() + expiresInMs;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const tick = (): void => {
+      const ms = deadline - performance.now();
+      if (ms <= 0) {
+        setState((prev) => (prev.expired ? prev : { text: "0:00", expired: true }));
+        if (iv) clearInterval(iv);
+        return;
+      }
+      setState({
+        text: `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`,
+        expired: false,
+      });
+    };
+    tick();
+    iv = setInterval(tick, 1000);
+    return () => {
+      if (iv) clearInterval(iv);
+    };
+  }, [expiresInMs]);
+  return state;
+}
+
+function OtpWindowBar({
+  trip,
+  text,
+  expired,
+}: {
+  trip: TripView;
+  text: string | null;
+  expired: boolean;
+}): React.ReactElement | null {
+  if (!text) return null;
+  const locked = trip.otpAttemptsLeft === 0;
+  const max = trip.otpAttemptsMax ?? 3;
+  return (
+    <div
+      className="row"
+      style={{
+        gap: 6,
+        padding: "7px 10px",
+        marginBottom: 8,
+        borderRadius: "var(--radius-sm)",
+        border: "var(--brut-border-thin)",
+        background: expired || locked ? "#fef2f2" : "var(--primary-soft)",
+        fontSize: 12,
+        fontWeight: 800,
+      }}
+    >
+      <Timer size={13} color={expired || locked ? "#dc2626" : "var(--primary)"} />
+      {expired ? (
+        <span role="status" style={{ color: "#b91c1c" }}>
+          Start code expired — ask the rider to tap “Show new start code”
+        </span>
+      ) : locked ? (
+        <span role="status" style={{ color: "#b91c1c" }}>
+          Locked after {max} wrong attempts — ask the rider to regenerate
+        </span>
+      ) : (
+        // Only the per-second numerals are hidden; the attempt count matters.
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <span aria-hidden>Code valid for</span>
+          <strong aria-hidden style={{ color: text.startsWith("0:") ? "#b91c1c" : "var(--ink)" }}>{text}</strong>
+          <span aria-hidden>·</span>
+          <span>
+            {trip.otpAttemptsLeft} of {max} attempts left
+          </span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function TripPanel({
   tripId,
   onFinished,
@@ -138,6 +220,9 @@ export function TripPanel({
     }
   }
 
+  // Hook must run before the early return below — one ticker for the whole card.
+  const { text: otpText, expired: otpExpired } = useOtpCountdown(trip?.otpExpiresInMs);
+
   if (!trip) {
     return (
       <NeoCard elevation="lg" className="trip-panel-overlay" style={{ padding: 22, background: "#ffffff" }}>
@@ -148,6 +233,7 @@ export function TripPanel({
   }
 
   const fare = trip.fareBreakdown;
+  const windowClosed = otpExpired || trip.otpAttemptsLeft === 0;
   const isPickupPhase = trip.state === "DRIVER_ASSIGNED" || trip.state === "ARRIVING";
   const navTarget = isPickupPhase ? trip.pickup : trip.drop;
 
@@ -231,18 +317,21 @@ export function TripPanel({
 
       {trip.state === "ARRIVED" && (
         <div style={{ margin: "8px 0" }}>
+          <OtpWindowBar trip={trip} text={otpText} expired={otpExpired} />
           <NeoInput
-            label="Passenger's 4-Digit Start OTP"
+            label="Passenger's 6-digit start code"
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-            placeholder="····"
+            placeholder="······"
             inputMode="numeric"
+            disabled={windowClosed}
             autoFocus
           />
           <NeoButton
             variant="green"
             fullWidth
-            disabled={busy || otp.length < 4}
+            disabled={busy || otp.length !== 6 || windowClosed}
+            aria-disabled={windowClosed}
             onClick={() => act(() => api.startTrip(trip.id, otp))}
           >
             Start Trip (Verify OTP) <KeyRound size={15} />

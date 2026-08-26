@@ -36,7 +36,10 @@ export async function api<T>(
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    if (res.status === 401 || (res.status === 403 && json.code === "FORBIDDEN")) {
+    // A wrong start OTP is 401 too (BAD_OTP) — never treat it as a dead session.
+    const sessionDead =
+      (res.status === 401 && json.code !== "BAD_OTP") || (res.status === 403 && json.code === "FORBIDDEN");
+    if (sessionDead) {
       setToken(null);
       window.dispatchEvent(new Event("storage"));
     }
@@ -116,6 +119,12 @@ export interface TripView {
   driverLng?: number;
   /** stars the caller already gave on this trip, when they rated */
   myRatingStars?: number;
+  /** start-code window for pre-start trips */
+  otpExpiresAt?: string;
+  otpExpiresInMs?: number;
+  otpAttemptsLeft?: number;
+  otpAttemptsMax?: number;
+  otpWindowOpensOnArrival?: boolean;
   paymentMethod?: "WALLET" | "UPI" | "CASH";
   startedAt?: string;
   endedAt?: string;
@@ -203,7 +212,13 @@ export function cancelMatchedTrip(tripId: string): Promise<{ state: string; dupl
   return api(`/v1/trips/${tripId}/cancel-rider`, { body: {} });
 }
 
-export function regenerateTripOtp(tripId: string): Promise<{ otp: string }> {
+export function regenerateTripOtp(tripId: string): Promise<{
+  otp: string;
+  otpExpiresInMs?: number;
+  otpAttemptsLeft?: number;
+  otpAttemptsMax?: number;
+  otpWindowOpensOnArrival?: boolean;
+}> {
   return api(`/v1/trips/${tripId}/regenerate-otp`, { body: {} });
 }
 export interface TripListResponse {

@@ -46,6 +46,7 @@ import {
 import {
   createTripFromAgreement,
   getTrip,
+  OTP_MAX_ATTEMPTS,
   readFareJson,
   regenerateTripOtp,
   settleTrip,
@@ -840,6 +841,9 @@ export async function startServer(listenPort = PORT): Promise<{
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
     if (trip.rider_id !== sess.userId && trip.driver_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
     if (trip.state === "ONGOING") return { state: "ONGOING" };
+    // The code is only enterable at the pickup: without this gate a driver could
+    // spend the whole attempt budget en route and get a fresh one on arrival.
+    if (trip.state !== "ARRIVED") fail(409, "NOT_AT_PICKUP", "mark arrival before entering the start code");
     if (!(await verifyStartOtp(sql, id, otp ?? ""))) fail(401, "BAD_OTP", "wrong OTP");
     const updated = await transitionTrip(sql, id, "ONGOING");
     pushRider(updated.rider_id, { t: "trip.state", state: "ONGOING" });
@@ -955,10 +959,24 @@ export async function startServer(listenPort = PORT): Promise<{
       "SELECT stars FROM ratings WHERE trip_id=$1 AND rater_id=$2",
       [id, sess.userId],
     );
+    // The start code only becomes a timed challenge once the driver is at the
+    // pickup — before that there is no countdown to show and nothing to expire.
+    let otpWindow: Record<string, unknown> = {};
+    if (["DRIVER_ASSIGNED", "ARRIVING"].includes(trip.state)) {
+      otpWindow = { otpWindowOpensOnArrival: true };
+    } else if (trip.state === "ARRIVED" && trip.otp_expires_at) {
+      otpWindow = {
+        otpExpiresAt: new Date(trip.otp_expires_at).toISOString(),
+        otpExpiresInMs: Math.max(0, Number(trip.otp_expires_in_ms ?? 0)),
+        otpAttemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - (trip.otp_attempts ?? 0)),
+        otpAttemptsMax: OTP_MAX_ATTEMPTS,
+      };
+    }
     return {
       ...tripView(trip),
       riderName: trip.rider_name ?? undefined,
       ...(mine.rows[0] ? { myRatingStars: mine.rows[0].stars } : {}),
+      ...otpWindow,
     };
   });
 
@@ -968,8 +986,20 @@ export async function startServer(listenPort = PORT): Promise<{
     const trip = await getTrip(sql, id);
     if (!trip) fail(404, "NOT_FOUND", "no such trip");
     if (trip.rider_id !== sess.userId) fail(403, "FORBIDDEN", "not your trip");
+    enforceRateLimit(`otp-regen:${id}`, 10, 5 * 60_000);
     try {
-      return { otp: await regenerateTripOtp(sql, id) };
+      // The window (if any) comes straight from the database — no app-clock math.
+      const { otp, expiresInMs } = await regenerateTripOtp(sql, id);
+      return {
+        otp,
+        ...(expiresInMs == null
+          ? { otpWindowOpensOnArrival: true }
+          : {
+              otpExpiresInMs: expiresInMs,
+              otpAttemptsLeft: OTP_MAX_ATTEMPTS,
+              otpAttemptsMax: OTP_MAX_ATTEMPTS,
+            }),
+      };
     } catch (err) {
       if (err instanceof TripError) fail(409, err.code, err.message);
       throw err;
@@ -1234,7 +1264,11 @@ export async function startServer(listenPort = PORT): Promise<{
     });
 
     const view = tripView({ ...trip, otpPlain: otp });
-    pushRider(rr.rider_id, { t: "driver.assigned", trip: { ...view, otp } as never });
+    // No countdown at assignment: the window opens when the driver arrives.
+    pushRider(rr.rider_id, {
+      t: "driver.assigned",
+      trip: { ...view, otp, otpWindowOpensOnArrival: true } as never,
+    });
     void sendPush(sql, rr.rider_id, {
       title: "Your driver is confirmed",
       body: `Driver accepted ₹${(agreed / 100).toFixed(2)}. Open Chalo-X for the start OTP.`,

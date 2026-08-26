@@ -544,11 +544,66 @@ async function runVerification(): Promise<void> {
     const tripId = acceptRes.json.tripId;
 
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVING" }, driverToken);
+
+    // pre-arrival: the code exists but is not a timed challenge yet
+    const preArrival = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    assert(
+      preArrival.json.otpWindowOpensOnArrival === true && preArrival.json.otpExpiresInMs === undefined,
+      "Pre-arrival trips advertise no countdown",
+    );
+    const earlyStart = await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
+    assert(
+      earlyStart.status === 409 && earlyStart.json.code === "NOT_AT_PICKUP",
+      "Start code cannot be spent before the driver marks arrival",
+    );
+
     await api(`/v1/trips/${tripId}/state`, { to: "ARRIVED" }, driverToken);
+
+    // arrival opens a fresh 5-minute window with a clean attempt budget
+    const arrivedView = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    assert(
+      arrivedView.json.otpExpiresInMs > 4 * 60_000 && arrivedView.json.otpExpiresInMs <= 5 * 60_000,
+      "Arrival re-stamps a fresh five-minute start-code window",
+      `${arrivedView.json.otpExpiresInMs}ms`,
+    );
+    assert(
+      arrivedView.json.otpAttemptsLeft === 3 && arrivedView.json.otpAttemptsMax === 3,
+      "Arrival resets the attempt budget",
+    );
+
+    // start-code window: 3-strike lock then expiry, regeneration recovers
+    for (let i = 0; i < 3; i++) {
+      const bad = await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
+      assert(bad.status === 401 && bad.json.code === "BAD_OTP", `Wrong OTP attempt ${i + 1} rejected with BAD_OTP`);
+    }
+    const locked = await api(`/v1/trips/${tripId}/start`, { otp: "000000" }, riderToken);
+    assert(locked.status === 409 && locked.json.code === "OTP_LOCKED", "Fourth wrong attempt locked out with OTP_LOCKED");
+    const attemptsView = await api(`/v1/trips/${tripId}`, undefined, driverToken);
+    assert(attemptsView.json.otpAttemptsLeft === 0 && typeof attemptsView.json.otpExpiresAt === "string", "Trip view exposes exhausted attempts and the code window");
+
+    // regeneration clears the lock and hands back the fresh window inline
     const regenRes = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);
     assert(regenRes.status === 200 && !!regenRes.json.otp, "Rider retrieved start OTP via secure regenerate-otp endpoint");
+    assert(
+      regenRes.json.otpAttemptsLeft === 3 && regenRes.json.otpExpiresInMs > 4 * 60_000,
+      "Regeneration returns a reset budget and a fresh window",
+    );
 
-    await api(`/v1/trips/${tripId}/start`, { otp: regenRes.json.otp }, riderToken);
+    // expiry beats a matching hash — a stale-but-correct code must fail closed
+    await serverHandle?.storage.sql.query(
+      "UPDATE otp_codes SET expires_at = now() - interval '1 minute' WHERE trip_id=$1",
+      [tripId],
+    );
+    const expiredStart = await api(`/v1/trips/${tripId}/start`, { otp: regenRes.json.otp }, riderToken);
+    assert(expiredStart.status === 409 && expiredStart.json.code === "OTP_EXPIRED", "Expired start code rejected even when the code matches");
+    const expiredView = await api(`/v1/trips/${tripId}`, undefined, riderToken);
+    assert(expiredView.json.otpExpiresInMs === 0, "Trip view reports a closed window as zero remaining");
+
+    // regeneration is the recovery path after both lock and expiry
+    const fresh = await api(`/v1/trips/${tripId}/regenerate-otp`, {}, riderToken);
+    assert(fresh.status === 200 && !!fresh.json.otp, "Regeneration mints a fresh 5-minute window");
+    const started = await api(`/v1/trips/${tripId}/start`, { otp: fresh.json.otp }, riderToken);
+    assert(started.status === 200 && started.json.state === "ONGOING", "Regenerated code starts the trip after lock and expiry");
     await api(`/v1/trips/${tripId}/complete`, {}, driverToken);
 
     const tipRes = await api(`/v1/trips/${tripId}/tip`, { amountPaise: 1500 }, riderToken);

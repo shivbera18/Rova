@@ -628,6 +628,7 @@ export async function startServer(listenPort = PORT): Promise<{
         fail(409, "EXPIRED", "request has expired");
       }
     }
+    if (rr.state === "EXPIRED") fail(409, "EXPIRED", "request has expired");
     if (rr.mode !== "LIST" || rr.state !== "MATCHING") fail(409, "NOT_CLAIMABLE", "not an open list request");
     await requireApprovedDriver(sess.userId, rr.vehicle_class);
     const trip = await finalizeAgreement(id, "", sess.userId);

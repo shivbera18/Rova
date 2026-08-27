@@ -71,6 +71,7 @@ export const MIGRATIONS = [
       version integer NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_requests_rider ON ride_requests (rider_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_requests_expires ON ride_requests (expires_at) WHERE state = 'MATCHING';
 
     CREATE TABLE IF NOT EXISTS negotiations (
       id uuid PRIMARY KEY,

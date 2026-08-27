@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatINR, paisa } from "@chalo/protocol";
 import { Heart, Rocket, Star, TriangleAlert, User } from "lucide-react";
 import { api, type Offer } from "./api";
@@ -6,7 +6,6 @@ import { NeoCard, NeoButton, NeoBadge } from "./NeoComponents";
 
 export interface OfferEntry {
   offer: Offer;
-  ttlMs: number;
 }
 let audioContext: AudioContext | null = null;
 
@@ -43,29 +42,40 @@ export function OfferCard({
   onAccept: (tripId: string) => void;
   onSkip: () => void;
 }) {
-  const { offer, ttlMs } = entry;
-  const [seconds, setSeconds] = useState(() => Math.ceil(ttlMs / 1000));
+  const { offer } = entry;
+  const initialSeconds = Math.max(0, Math.ceil((Date.parse(offer.expiresAt) - Date.now()) / 1000));
+  const [seconds, setSeconds] = useState(() => initialSeconds);
   const [showCounter, setShowCounter] = useState(false);
   const [counterInput, setCounterInput] = useState(() => (offer.takeHomePaise / 100 + 20).toString());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const onSkipRef = useRef(onSkip);
+  onSkipRef.current = onSkip;
+  const totalRef = useRef(Math.max(1, initialSeconds));
 
   useEffect(() => {
     playChime();
-  }, [offer.requestId]);
+  }, [offer.requestId, offer.round]);
 
   useEffect(() => {
-    const end = Date.now() + ttlMs;
+    const next = Math.max(0, Math.ceil((Date.parse(offer.expiresAt) - Date.now()) / 1000));
+    setSeconds(next);
+    totalRef.current = Math.max(1, next);
+  }, [offer.expiresAt, offer.requestId, offer.round]);
+
+  useEffect(() => {
+    const end = Date.parse(offer.expiresAt);
+    if (Number.isNaN(end)) return;
     const iv = setInterval(() => {
       const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
       setSeconds(remaining);
       if (remaining <= 0) {
         clearInterval(iv);
-        onSkip();
+        onSkipRef.current();
       }
     }, 250);
     return () => clearInterval(iv);
-  }, [ttlMs, onSkip]);
+  }, [offer.expiresAt, offer.requestId, offer.round]);
 
   const accept = async (): Promise<void> => {
     setBusy(true);
@@ -102,7 +112,7 @@ export function OfferCard({
     }
   };
 
-  const progressPct = Math.max(0, Math.min(100, (seconds / (ttlMs / 1000)) * 100));
+  const progressPct = Math.max(0, Math.min(100, (seconds / totalRef.current) * 100));
 
   return (
     <NeoCard elevation="lg" className="offer-card-overlay" style={{ padding: 22, background: "#ffffff" }}>

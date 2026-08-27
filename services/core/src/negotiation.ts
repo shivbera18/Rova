@@ -184,6 +184,39 @@ export async function sweepExpiredNegotiations(
     platformFee: Number(row.platform_fee ?? 0),
   }));
 }
+
+/** Sweeper for LIST-mode requests that have no negotiation row. */
+export async function sweepExpiredListRequests(
+  sql: SqlRowClient,
+): Promise<Array<{ requestId: string; riderId: string; listPrice: number; platformFee: number; vehicleClass: string }>> {
+  const expired = await sql.query<{
+    id: string; rider_id: string; list_price: number; platform_fee: number | null; vehicle_class: string;
+  }>(
+    `UPDATE ride_requests
+     SET state='EXPIRED', version=version+1
+     WHERE mode='LIST' AND state='MATCHING'
+       AND (
+         expires_at IS NOT NULL AND expires_at < now()
+         OR expires_at IS NULL AND created_at < now() - interval '90 seconds'
+       )
+     RETURNING id, rider_id, list_price, platform_fee, vehicle_class`,
+  );
+  for (const row of expired.rows) {
+    await publish(TOPICS.requestExpired, {
+      requestId: row.id,
+      action: "LIST_EXPIRE",
+      from: "MATCHING",
+      to: "EXPIRED",
+    });
+  }
+  return expired.rows.map((row) => ({
+    requestId: row.id,
+    riderId: row.rider_id,
+    listPrice: Number(row.list_price),
+    platformFee: Number(row.platform_fee ?? 0),
+    vehicleClass: row.vehicle_class,
+  }));
+}
 // ---- internals ---------------------------------------------------------------
 
 async function requireLive(sql: SqlRowClient, negId: string): Promise<NegotiationRow> {

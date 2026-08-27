@@ -170,6 +170,10 @@ export const MIGRATIONS = [
 
     -- "ride again" requests route to exactly this driver instead of broadcasting
     ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS requested_driver_id uuid REFERENCES users(id);
+
+    -- v1.1: persist per-request expiry and rider platform contribution for LIST mode
+    ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS platform_fee bigint;
+    ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS expires_at timestamptz;
     `,
   },
 ];

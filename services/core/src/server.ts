@@ -30,6 +30,7 @@ import {
   riderAcceptCounter,
   riderDecline,
   riderFinalOffer,
+  sweepExpiredListRequests,
   sweepExpiredNegotiations,
 } from "./negotiation.ts";
 import {
@@ -432,12 +433,13 @@ export async function startServer(listenPort = PORT): Promise<{
       throw err;
     }
     const requestId = randomUUID();
+    const listExpiresAt = negotiated ? null : new Date(Date.now() + 90_000);
     await sql.query(
       `INSERT INTO ride_requests
          (id, rider_id, city_id, vehicle_class, mode, state, payment_method,
           pickup_lat, pickup_lng, drop_lat, drop_lng, list_price, platform_fee,
-          pickup_label, drop_label, requested_driver_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+          pickup_label, drop_label, requested_driver_id, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [
         requestId,
         sess.userId,
@@ -455,6 +457,7 @@ export async function startServer(listenPort = PORT): Promise<{
         clean(body.pickupLabel),
         clean(body.dropLabel),
         requestedDriverId,
+        listExpiresAt,
       ],
     );
 
@@ -478,8 +481,9 @@ export async function startServer(listenPort = PORT): Promise<{
       }
       negotiationId = negotiation.id;
       expiresAt = new Date(negotiation.expires_at);
+      await sql.query("UPDATE ride_requests SET expires_at=$2 WHERE id=$1", [requestId, expiresAt]);
     } else {
-      expiresAt = new Date(Date.now() + 90_000);
+      expiresAt = listExpiresAt!;
     }
 
     const delivered = await broadcastRequest({
@@ -607,12 +611,23 @@ export async function startServer(listenPort = PORT): Promise<{
     const sess = requireDriver(await session(req));
     const { id } = req.params as { id: string };
     const rr = (
-      await sql.query<{ mode: string; state: string; vehicle_class: string }>(
-        "SELECT mode, state, vehicle_class FROM ride_requests WHERE id=$1",
+      await sql.query<{ mode: string; state: string; vehicle_class: string; created_at: string; expires_at: string | null }>(
+        "SELECT mode, state, vehicle_class, created_at, expires_at FROM ride_requests WHERE id=$1",
         [id],
       )
     ).rows[0];
     if (!rr) fail(404, "NOT_FOUND", "no such request");
+    if (rr.mode === "LIST" && rr.state === "MATCHING") {
+      const isExpired = rr.expires_at
+        ? new Date(rr.expires_at).getTime() < Date.now()
+        : Date.now() - new Date(rr.created_at).getTime() > 90_000;
+      if (isExpired) {
+        await sql.query("UPDATE ride_requests SET state='EXPIRED', version=version+1 WHERE id=$1 AND state='MATCHING'", [id]).catch(() => undefined);
+        releaseClaim(id);
+        void cancelBroadcast(id);
+        fail(409, "EXPIRED", "request has expired");
+      }
+    }
     if (rr.mode !== "LIST" || rr.state !== "MATCHING") fail(409, "NOT_CLAIMABLE", "not an open list request");
     await requireApprovedDriver(sess.userId, rr.vehicle_class);
     const trip = await finalizeAgreement(id, "", sess.userId);
@@ -1616,9 +1631,10 @@ export async function startServer(listenPort = PORT): Promise<{
 
   const sweeperTimer = setInterval(async () => {
     try {
-      const expired = await sweepExpiredNegotiations(sql);
-      for (const exp of expired) {
+      const expiredNegs = await sweepExpiredNegotiations(sql);
+      for (const exp of expiredNegs) {
         releaseClaim(exp.requestId);
+        void cancelBroadcast(exp.requestId);
         pushRider(exp.riderId, {
           t: "request.updated",
           session: {
@@ -1632,6 +1648,24 @@ export async function startServer(listenPort = PORT): Promise<{
             round: exp.round,
             maxRounds: 3,
             listPrice: exp.listPrice as never,
+          },
+        });
+      }
+      const expiredLists = await sweepExpiredListRequests(sql);
+      for (const exp of expiredLists) {
+        releaseClaim(exp.requestId);
+        void cancelBroadcast(exp.requestId);
+        pushRider(exp.riderId, {
+          t: "request.updated",
+          session: {
+            id: exp.requestId,
+            mode: "LIST",
+            state: "EXPIRED",
+            round: 1,
+            maxRounds: 3,
+            listPrice: exp.listPrice as never,
+            platformFeePaise: exp.platformFee as never,
+            riderTotalPaise: exp.listPrice as never,
           },
         });
       }

@@ -92,9 +92,10 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
               const sameRound = offer.round === existing.offer.round;
               const sameCounter = offer.isCounter === existing.offer.isCounter;
               const sameAmount = offer.takeHomePaise === existing.offer.takeHomePaise;
-              if (sameRound && sameCounter && sameAmount) return prev;
+              const sameExpiry = offer.expiresAt === existing.offer.expiresAt;
+              if (sameRound && sameCounter && sameAmount && sameExpiry) return prev;
               if (offer.round < existing.offer.round) return prev;
-              // newer round or different amount/flag -> replace in place and move to top
+              // newer round or refreshed deadline/different amount -> replace and promote to top
               const next = [...prev];
               next.splice(idx, 1);
               return [{ offer }, ...next];

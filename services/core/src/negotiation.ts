@@ -202,8 +202,7 @@ export async function sweepExpiredListRequests(
      RETURNING id, rider_id, list_price, platform_fee, vehicle_class`,
   );
   for (const row of expired.rows) {
-    await publish(TOPICS.negotiationEvent, {
-      negotiationId: null as unknown as string,
+    await publish(TOPICS.requestExpired, {
       requestId: row.id,
       action: "LIST_EXPIRE",
       from: "MATCHING",

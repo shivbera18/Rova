@@ -85,10 +85,21 @@ function DriverConsole({ onLogout }: { onLogout: () => void }) {
           if (!onlineRef.current) return;
           unlockOfferAudio();
           const offer = msg.offer;
-          const ttlMs = offer.expiresAt ? Math.max(0, new Date(offer.expiresAt).getTime() - Date.now()) : 20000;
           setOffers((prev) => {
-            if (prev.some((o) => o.offer.requestId === offer.requestId)) return prev;
-            return [{ offer, ttlMs }, ...prev];
+            const idx = prev.findIndex((o) => o.offer.requestId === offer.requestId);
+            if (idx >= 0) {
+              const existing = prev[idx]!;
+              const sameRound = offer.round === existing.offer.round;
+              const sameCounter = offer.isCounter === existing.offer.isCounter;
+              const sameAmount = offer.takeHomePaise === existing.offer.takeHomePaise;
+              if (sameRound && sameCounter && sameAmount) return prev;
+              if (offer.round < existing.offer.round) return prev;
+              // newer round or different amount/flag -> replace in place and move to top
+              const next = [...prev];
+              next.splice(idx, 1);
+              return [{ offer }, ...next];
+            }
+            return [{ offer }, ...prev];
           });
         } else if (msg.t === "dispatch.cancel") {
           setOffers((prev) => prev.filter((o) => o.offer.requestId !== msg.requestId));

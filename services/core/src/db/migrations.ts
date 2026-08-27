@@ -71,7 +71,6 @@ export const MIGRATIONS = [
       version integer NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_requests_rider ON ride_requests (rider_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_requests_expires ON ride_requests (expires_at) WHERE state = 'MATCHING';
 
     CREATE TABLE IF NOT EXISTS negotiations (
       id uuid PRIMARY KEY,
@@ -175,6 +174,7 @@ export const MIGRATIONS = [
     -- v1.1: persist per-request expiry and rider platform contribution for LIST mode
     ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS platform_fee bigint;
     ALTER TABLE ride_requests ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+    CREATE INDEX IF NOT EXISTS idx_requests_expires ON ride_requests (expires_at) WHERE state = 'MATCHING';
     `,
   },
 ];
